@@ -42,7 +42,7 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
-          if wrangler pages project list --account-id=$CLOUDFLARE_ACCOUNT_ID | grep -q "$PROJECT_NAME"; then
+          if wrangler pages project list  | grep -q "$PROJECT_NAME"; then
             echo "✅ Pages project already exists"
           else
             echo "🚀 Creating Pages project"
