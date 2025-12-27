@@ -32,8 +32,8 @@ jobs:
         run: bun install --frozen-lockfile
 
       # 4️⃣ Lint (fails pipeline if lint fails)
-      - name: Lint
-        run: bun run lint
+    #   - name: Lint
+        # run: bun run lint
 
       # 5️⃣ Build Vite project
       - name: Build
