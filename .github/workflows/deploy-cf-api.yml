@@ -1,4 +1,4 @@
-name: Automated Deployment of Backend cf-api to Cloudflare Workers
+name: Deploy Backend cf-api to Cloudflare Workers
 
 on:
   push:
