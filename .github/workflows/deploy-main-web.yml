@@ -20,35 +20,23 @@ jobs:
       BUILD_DIR: dist
 
     steps:
-      # 1️⃣ Checkout code
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 2️⃣ Setup Bun
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
 
-      # 3️⃣ Install dependencies
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      # 4️⃣ Build Vite frontend
       - name: Build frontend
         run: bun run build
 
-      # 5️⃣ Setup Wrangler (Cloudflare CLI)
       - name: Setup Wrangler
         run: bun add -g wrangler
 
-      # 6️⃣ Authenticate Wrangler
-      - name: Wrangler Auth
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-        run: wrangler whoami
-
-      # 7️⃣ Ensure Pages project exists (CREATE IF MISSING)
       - name: Ensure Cloudflare Pages project exists
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -62,7 +50,6 @@ jobs:
               --production-branch=main
           fi
 
-      # 8️⃣ Deploy to Cloudflare Pages
       - name: Deploy to Cloudflare Pages
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
