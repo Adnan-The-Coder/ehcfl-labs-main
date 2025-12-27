@@ -9,16 +9,19 @@ on:
       - main
 
 jobs:
-  build-and-deploy:
+  deploy:
     runs-on: ubuntu-latest
 
     permissions:
       contents: read
-      deployments: write
+
+    env:
+      PROJECT_NAME: ehcflabs-main-web
+      BUILD_DIR: dist
 
     steps:
-      # 1️⃣ Checkout repository
-      - name: Checkout code
+      # 1️⃣ Checkout code
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       # 2️⃣ Setup Bun
@@ -27,24 +30,44 @@ jobs:
         with:
           bun-version: latest
 
-      # 3️⃣ Install dependencies (frontend only)
+      # 3️⃣ Install dependencies
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      # 4️⃣ Lint (fails pipeline if lint fails)
-    #   - name: Lint
-        # run: bun run lint
-
-      # 5️⃣ Build Vite project
-      - name: Build
+      # 4️⃣ Build Vite frontend
+      - name: Build frontend
         run: bun run build
 
-      # 6️⃣ Deploy to Cloudflare Pages
+      # 5️⃣ Setup Wrangler (Cloudflare CLI)
+      - name: Setup Wrangler
+        run: bun add -g wrangler
+
+      # 6️⃣ Authenticate Wrangler
+      - name: Wrangler Auth
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: wrangler whoami
+
+      # 7️⃣ Ensure Pages project exists (CREATE IF MISSING)
+      - name: Ensure Cloudflare Pages project exists
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          if wrangler pages project list --account-id=$CLOUDFLARE_ACCOUNT_ID | grep -q "$PROJECT_NAME"; then
+            echo "✅ Pages project already exists"
+          else
+            echo "🚀 Creating Pages project"
+            wrangler pages project create "$PROJECT_NAME" \
+              --account-id=$CLOUDFLARE_ACCOUNT_ID \
+              --production-branch=main
+          fi
+
+      # 8️⃣ Deploy to Cloudflare Pages
       - name: Deploy to Cloudflare Pages
-        uses: cloudflare/pages-action@v1
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          projectName: "ehcflabs-main-web"
-          directory: dist
-          gitHubToken: ${{ secrets.GITHUB_TOKEN }}
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          wrangler pages deploy $BUILD_DIR \
+            --project-name=$PROJECT_NAME \
+            ${{ github.event_name == 'pull_request' && '--branch=preview' || '--branch=main' }}
