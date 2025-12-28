@@ -4,15 +4,45 @@ import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Minus, Plus, X, ShoppingBag } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Navbar } from '@/components/Navbar';
 import { Footer } from '@/components/Footer';
+import SignIn from '@/components/Sign-in';
+import { supabase } from '@/utils/supabase/client';
 
 const Cart = () => {
   const { items, removeItem, updateQuantity, totalItems, totalPrice, totalMRP, discount } = useCart();
   const navigate = useNavigate();
   const [couponCode, setCouponCode] = useState('');
   const [appliedCoupon, setAppliedCoupon] = useState<{ code: string; discount: number } | null>(null);
+  const [isSignInOpen, setIsSignInOpen] = useState(false);
+  const [user, setUser] = useState<{ id: string } | null>(null);
+
+  // Load current auth session and subscribe to changes
+  useEffect(() => {
+    let active = true;
+    const loadSession = async () => {
+      try {
+        const { data } = await supabase.auth.getSession();
+        const sUser = data.session?.user;
+        if (active && sUser) {
+          setUser({ id: sUser.id });
+        } else if (active) {
+          setUser(null);
+        }
+      } catch {
+        setUser(null);
+      }
+    };
+    loadSession();
+    const { data: sub } = supabase.auth.onAuthStateChange(() => {
+      loadSession();
+    });
+    return () => {
+      active = false;
+      sub.subscription.unsubscribe();
+    };
+  }, []);
 
   const applyCoupon = () => {
     if (couponCode.toUpperCase() === 'HEALTH50') {
@@ -152,7 +182,13 @@ const Cart = () => {
                 <Button
                   className="w-full"
                   size="lg"
-                  onClick={() => navigate('/booking', { state: { appliedCoupon } })}
+                  onClick={() => {
+                    if (!user) {
+                      setIsSignInOpen(true);
+                    } else {
+                      navigate('/booking', { state: { appliedCoupon } });
+                    }
+                  }}
                 >
                   Proceed to Book
                 </Button>
@@ -162,6 +198,8 @@ const Cart = () => {
         </div>
       </div>
       <Footer />
+      {/* Sign-In Modal when not authenticated */}
+      <SignIn isOpen={isSignInOpen} onClose={() => setIsSignInOpen(false)} redirectUrl="/booking" />
     </>
   );
 };

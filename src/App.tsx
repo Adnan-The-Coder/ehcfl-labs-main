@@ -11,7 +11,6 @@ import Booking from "./pages/Booking";
 import Confirmation from "./pages/Confirmation";
 import Track from "./pages/Track";
 import MyOrders from "./pages/MyOrders";
-import Testing from "./pages/Testing";
 import AuthCallback from "./pages/AuthCallback";
 import NotFound from "./pages/NotFound";
 
@@ -40,7 +39,6 @@ const App = () => (
             <Route path="/confirmation" element={<Confirmation />} />
             <Route path="/track" element={<Track />} />
             <Route path="/my-orders" element={<MyOrders />} />
-            <Route path="/testing" element={<Testing />} />
             <Route path="/auth/callback" element={<AuthCallback />} />
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
             <Route path="*" element={<NotFound />} />
