@@ -62,6 +62,7 @@ app.use("*", (c, next) => {
 
 const ALLOWED_ORIGINS = new Set([
   "http://localhost:3000",
+  "http://localhost:8080",
   "https://ehcflabs-main-web.pages.dev",
 ]);
 

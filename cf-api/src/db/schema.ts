@@ -23,5 +23,8 @@ export const userProfiles = sqliteTable("userProfiles", {
 
   email_notifications: text("email_notifications"),
 
-  email: text("email").notNull(), 
+  email: text("email").notNull(),
+  
+  // User login tracking information (stored as JSON text)
+  user_login_info: text("user_login_info"),
 });

@@ -39,6 +39,7 @@ export const createProfile = async (c: Context) => {
       state,
       pincode,
       email_notifications,
+      user_login_info,
     } = body;
 
     // Basic Validation
@@ -50,6 +51,11 @@ export const createProfile = async (c: Context) => {
     if (!emailRegex.test(email)) {
       return c.json({ success: false, message: 'Invalid email address.' }, 400);
     }
+
+    // Serialize user_login_info if it's an object
+    const userLoginInfoString = user_login_info 
+      ? (typeof user_login_info === 'string' ? user_login_info : JSON.stringify(user_login_info))
+      : null;
 
     // Insert into userProfiles table
     const result = await db.insert(userProfiles).values({
@@ -63,6 +69,7 @@ export const createProfile = async (c: Context) => {
       state,
       pincode,
       email_notifications,
+      user_login_info: userLoginInfoString,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     }).returning();
@@ -79,6 +86,7 @@ export const createProfile = async (c: Context) => {
         city: result[0].city,
         state: result[0].state,
         pincode: result[0].pincode,
+        user_login_info: result[0].user_login_info,
         createdAt: result[0].created_at,
       }
     });
@@ -135,12 +143,19 @@ export const updateProfileByUUID = async (c: Context) => {
     // Only allow updating fields that exist in the schema
     const allowedFields = [
       'full_name', 'avatar_url', 'phone', 'address', 'city', 'state', 'pincode',
-      'email_notifications',
+      'email_notifications', 'user_login_info',
     ];
     const updateData: Record<string, any> = {};
 
     for (const key of allowedFields) {
-      if (body[key] !== undefined) updateData[key] = body[key];
+      if (body[key] !== undefined) {
+        // Serialize user_login_info if it's an object
+        if (key === 'user_login_info' && typeof body[key] === 'object') {
+          updateData[key] = JSON.stringify(body[key]);
+        } else {
+          updateData[key] = body[key];
+        }
+      }
     }
 
     if (Object.keys(updateData).length === 0) {

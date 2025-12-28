@@ -41,7 +41,7 @@ const App = () => (
             <Route path="/track" element={<Track />} />
             <Route path="/my-orders" element={<MyOrders />} />
             <Route path="/testing" element={<Testing />} />
-            {/* <Route path="/auth/callback" element={<AuthCallback />} /> */}
+            <Route path="/auth/callback" element={<AuthCallback />} />
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
             <Route path="*" element={<NotFound />} />
           </Routes>

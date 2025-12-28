@@ -19,5 +19,6 @@ userRoutes.get('/:uuid', getProfileByUUID);
 
 // Update a profile by UUID
 userRoutes.put('/:uuid', updateProfileByUUID);
+userRoutes.patch('/:uuid', updateProfileByUUID);
 
 export default userRoutes;
