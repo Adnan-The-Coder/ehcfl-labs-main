@@ -11,6 +11,9 @@ import AddressStep from '@/components/booking/AddressStep';
 import DateTimeStep from '@/components/booking/DateTimeStep';
 import ReviewStep from '@/components/booking/ReviewStep';
 import { CheckCircle2 } from 'lucide-react';
+import { supabase } from '@/utils/supabase/client';
+import { API_ENDPOINTS } from '@/config/api';
+import { useToast } from '@/hooks/use-toast';
 
 export interface Customer {
   name: string;
@@ -50,8 +53,10 @@ const Booking = () => {
   const location = useLocation();
   const { items, totalPrice, clearCart } = useCart();
   const appliedCoupon = location.state?.appliedCoupon || null;
+  const { toast } = useToast();
 
   const [currentStep, setCurrentStep] = useState(1);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [bookingData, setBookingData] = useState<BookingData>({
     customers: [],
     address: null,
@@ -79,25 +84,89 @@ const Booking = () => {
     }
   };
 
-  const handleConfirmBooking = () => {
-    const bookingId = `BKG${Date.now()}`;
-    const booking = {
-      id: bookingId,
-      ...bookingData,
-      packages: items,
-      totalPrice,
-      coupon: appliedCoupon,
-      status: 'confirmed',
-      createdAt: new Date().toISOString(),
-    };
+  const handleConfirmBooking = async () => {
+    setIsSubmitting(true);
+    
+    try {
+      // Get current user session
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      
+      if (sessionError || !session) {
+        toast({
+          variant: 'destructive',
+          title: 'Authentication Error',
+          description: 'You must be logged in to complete booking. Please log in and try again.',
+        });
+        navigate('/cart');
+        return;
+      }
 
-    // Save to localStorage
-    const bookings = JSON.parse(localStorage.getItem('ehcf-bookings') || '[]');
-    bookings.push(booking);
-    localStorage.setItem('ehcf-bookings', JSON.stringify(bookings));
+      const userUuid = session.user.id;
+      const bookingId = `BKG${Date.now()}`;
+      
+      // Prepare booking payload
+      const bookingPayload = {
+        booking_id: bookingId,
+        user_uuid: userUuid,
+        customers: bookingData.customers,
+        address: bookingData.address,
+        booking_date: bookingData.date,
+        time_slot: bookingData.timeSlot,
+        packages: items,
+        total_price: totalPrice,
+        coupon: appliedCoupon,
+        payment_method: bookingData.paymentMethod,
+        payment_status: 'pending',
+        status: 'confirmed',
+      };
 
-    clearCart();
-    navigate('/confirmation', { state: { bookingId, booking } });
+      // Make API call to create booking
+      const response = await fetch(API_ENDPOINTS.createBooking, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(bookingPayload),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok || !result.success) {
+        throw new Error(result.message || 'Failed to create booking');
+      }
+
+      // Clear cart and navigate to confirmation
+      clearCart();
+      
+      toast({
+        title: 'Booking Confirmed!',
+        description: `Your booking ID is ${bookingId}`,
+      });
+
+      navigate('/confirmation', { 
+        state: { 
+          bookingId, 
+          booking: {
+            id: bookingId,
+            ...bookingData,
+            packages: items,
+            totalPrice,
+            coupon: appliedCoupon,
+            status: 'confirmed',
+            createdAt: new Date().toISOString(),
+          }
+        } 
+      });
+    } catch (error) {
+      console.error('Booking error:', error);
+      toast({
+        variant: 'destructive',
+        title: 'Booking Failed',
+        description: error instanceof Error ? error.message : 'An unexpected error occurred. Please try again.',
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const progress = (currentStep / 4) * 100;
@@ -179,6 +248,7 @@ const Booking = () => {
                 }
                 onConfirm={handleConfirmBooking}
                 onBack={handleBack}
+                isSubmitting={isSubmitting}
               />
             )}
           </Card>

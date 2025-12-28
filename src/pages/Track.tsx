@@ -1,4 +1,5 @@
-import { useState } from 'react';
+/* eslint-disable @typescript-eslint/no-explicit-any */
+import { useState, useEffect } from 'react';
 import { Navbar } from '@/components/Navbar';
 import { Footer } from '@/components/Footer';
 import { Card } from '@/components/ui/card';
@@ -6,8 +7,10 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
-import { CheckCircle2, Clock, Phone, MapPin } from 'lucide-react';
+import { CheckCircle2, Clock, Phone, MapPin, Loader2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import { API_ENDPOINTS } from '@/config/api';
+import { supabase } from '@/utils/supabase/client';
 
 interface BookingStatus {
   code: string;
@@ -20,6 +23,7 @@ const Track = () => {
   const [searchType, setSearchType] = useState<'bookingId' | 'phone'>('bookingId');
   const [searchValue, setSearchValue] = useState('');
   const [booking, setBooking] = useState<any>(null);
+  const [loading, setLoading] = useState(false);
   const { toast } = useToast();
 
   const statusMapping: Record<string, { label: string; description: string }> = {
@@ -32,26 +36,75 @@ const Track = () => {
     ready: { label: 'Report Ready', description: 'Your report is ready for download' },
   };
 
-  const handleTrack = () => {
-    const bookings = JSON.parse(localStorage.getItem('ehcf-bookings') || '[]');
-    
-    let foundBooking = null;
-    if (searchType === 'bookingId') {
-      foundBooking = bookings.find((b: any) => b.id === searchValue);
-    } else {
-      foundBooking = bookings.find((b: any) => 
-        b.customers.some((c: any) => c.phone === searchValue)
-      );
-    }
+  const parseBooking = (raw: any) => ({
+    id: raw.booking_id,
+    customers: typeof raw.customers === 'string' ? JSON.parse(raw.customers) : raw.customers,
+    address: typeof raw.address === 'string' ? JSON.parse(raw.address) : raw.address,
+    packages: typeof raw.packages === 'string' ? JSON.parse(raw.packages) : raw.packages,
+    coupon: raw.coupon ? (typeof raw.coupon === 'string' ? JSON.parse(raw.coupon) : raw.coupon) : null,
+    date: raw.booking_date,
+    timeSlot: raw.time_slot,
+    totalPrice: raw.total_price,
+    paymentMethod: raw.payment_method,
+    status: raw.status,
+    createdAt: raw.created_at,
+    updatedAt: raw.updated_at,
+  });
 
-    if (foundBooking) {
-      setBooking(foundBooking);
-    } else {
+  const handleTrack = async () => {
+    if (!searchValue) {
       toast({
-        title: 'Not Found',
-        description: 'No booking found with the provided details',
+        title: 'Missing input',
+        description: `Please enter a ${searchType === 'bookingId' ? 'Booking ID' : 'phone number'}.`,
         variant: 'destructive',
       });
+      return;
+    }
+
+    setLoading(true);
+    setBooking(null);
+    try {
+      if (searchType === 'bookingId') {
+        const res = await fetch(API_ENDPOINTS.getBookingById(searchValue));
+        const json = await res.json();
+        if (!res.ok || !json.success || !json.data) {
+          throw new Error(json.message || 'Booking not found');
+        }
+        setBooking(parseBooking(json.data));
+      } else {
+        // Try fetching only the current user's bookings; fall back to all
+        const { data: { session } } = await supabase.auth.getSession();
+        let res;
+        if (session?.user?.id) {
+          res = await fetch(API_ENDPOINTS.getBookingsByUserUUID(session.user.id));
+        } else {
+          res = await fetch(API_ENDPOINTS.getAllBookings);
+        }
+        const json = await res.json();
+        if (!res.ok || !json.success || !json.data) {
+          throw new Error(json.message || 'No bookings found');
+        }
+        const list: any[] = json.data;
+        const matches = list.filter((b: any) => {
+          const customers = typeof b.customers === 'string' ? JSON.parse(b.customers) : b.customers;
+          return Array.isArray(customers) && customers.some((c: any) => `${c.phone}` === searchValue);
+        });
+        if (matches.length === 0) {
+          throw new Error('No booking found for this phone number');
+        }
+        // Pick the most recent by created_at
+        matches.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+        setBooking(parseBooking(matches[0]));
+      }
+    } catch (err) {
+      console.error('Track error:', err);
+      toast({
+        title: 'Not Found',
+        description: err instanceof Error ? err.message : 'No booking found with the provided details',
+        variant: 'destructive',
+      });
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -66,6 +119,29 @@ const Track = () => {
       current: index === currentIndex,
     }));
   };
+
+  // Poll status every 15s when tracking by booking ID
+  useEffect(() => {
+    let timer: number | undefined;
+    const shouldPoll = Boolean(booking?.id) && searchType === 'bookingId';
+    if (shouldPoll) {
+      const poll = async () => {
+        try {
+          const res = await fetch(API_ENDPOINTS.getBookingById(booking.id));
+          const json = await res.json();
+          if (res.ok && json.success && json.data) {
+            setBooking(parseBooking(json.data));
+          }
+        } catch (e) {
+          // silent fail on polling
+        }
+      };
+      timer = window.setInterval(poll, 15000);
+    }
+    return () => {
+      if (timer) window.clearInterval(timer);
+    };
+  }, [booking?.id, searchType]);
 
   return (
     <>
@@ -113,7 +189,16 @@ const Track = () => {
                           : 'Enter 10-digit phone number'
                       }
                     />
-                    <Button onClick={handleTrack}>Track Booking</Button>
+                    <Button onClick={handleTrack} disabled={loading}>
+                      {loading ? (
+                        <>
+                          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                          Searching...
+                        </>
+                      ) : (
+                        'Track Booking'
+                      )}
+                    </Button>
                   </div>
                 </div>
               </div>

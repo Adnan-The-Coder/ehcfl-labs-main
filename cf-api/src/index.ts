@@ -3,6 +3,7 @@ import { cors } from "hono/cors";
 import { secureHeaders } from "hono/secure-headers";
 import { requestId } from "hono/request-id";
 import userRoutes from "./routes/user.auth";
+import bookingRoutes from "./routes/bookings";
 
 interface CloudflareBindings {
   ENVIRONMENT?: string;
@@ -184,5 +185,6 @@ app.get("/message", (c) => {
 });
 
 app.route('/users', userRoutes);
+app.route('/bookings', bookingRoutes);
 
 export default app;

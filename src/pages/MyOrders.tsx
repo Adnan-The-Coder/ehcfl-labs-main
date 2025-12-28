@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { useState, useEffect } from 'react';
 import { Navbar } from '@/components/Navbar';
 import { Footer } from '@/components/Footer';
@@ -5,15 +6,20 @@ import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
-import { ShoppingBag, Clock, CheckCircle2, XCircle, Calendar, Download } from 'lucide-react';
+import { ShoppingBag, Clock, CheckCircle2, XCircle, Calendar, Download, Loader2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import RescheduleModal from '@/components/booking/RescheduleModal';
 import CancelModal from '@/components/booking/CancelModal';
 import AddOnModal from '@/components/booking/AddOnModal';
+import { supabase } from '@/utils/supabase/client';
+import { API_ENDPOINTS } from '@/config/api';
+import { useToast } from '@/hooks/use-toast';
 
 const MyOrders = () => {
   const navigate = useNavigate();
+  const { toast } = useToast();
   const [bookings, setBookings] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('active');
   const [selectedBooking, setSelectedBooking] = useState<any>(null);
   const [rescheduleModalOpen, setRescheduleModalOpen] = useState(false);
@@ -21,9 +27,64 @@ const MyOrders = () => {
   const [addOnModalOpen, setAddOnModalOpen] = useState(false);
 
   useEffect(() => {
-    const savedBookings = JSON.parse(localStorage.getItem('ehcf-bookings') || '[]');
-    setBookings(savedBookings);
-  }, []);
+    const fetchBookings = async () => {
+      setLoading(true);
+      try {
+        // Get current user session
+        const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+        
+        if (sessionError || !session) {
+          toast({
+            variant: 'destructive',
+            title: 'Authentication Required',
+            description: 'Please log in to view your orders.',
+          });
+          navigate('/');
+          return;
+        }
+
+        const userUuid = session.user.id;
+
+        // Fetch bookings from API
+        const response = await fetch(API_ENDPOINTS.getBookingsByUserUUID(userUuid));
+        const result = await response.json();
+
+        if (!response.ok || !result.success) {
+          throw new Error(result.message || 'Failed to fetch bookings');
+        }
+
+        // Parse JSON fields
+        const parsedBookings = result.data.map((booking: any) => ({
+          ...booking,
+          id: booking.booking_id, // Map to the expected 'id' field
+          customers: typeof booking.customers === 'string' ? JSON.parse(booking.customers) : booking.customers,
+          address: typeof booking.address === 'string' ? JSON.parse(booking.address) : booking.address,
+          packages: typeof booking.packages === 'string' ? JSON.parse(booking.packages) : booking.packages,
+          coupon: booking.coupon ? (typeof booking.coupon === 'string' ? JSON.parse(booking.coupon) : booking.coupon) : null,
+          date: booking.booking_date,
+          timeSlot: booking.time_slot,
+          totalPrice: booking.total_price,
+          paymentMethod: booking.payment_method,
+          paymentStatus: booking.payment_status,
+          createdAt: booking.created_at,
+          updatedAt: booking.updated_at,
+        }));
+
+        setBookings(parsedBookings);
+      } catch (error) {
+        console.error('Error fetching bookings:', error);
+        toast({
+          variant: 'destructive',
+          title: 'Error',
+          description: error instanceof Error ? error.message : 'Failed to load bookings. Please try again.',
+        });
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchBookings();
+  }, [navigate, toast]);
 
   const activeBookings = bookings.filter(
     (b) => b.status !== 'cancelled' && b.status !== 'ready' && b.status !== 'completed'
@@ -174,6 +235,24 @@ const MyOrders = () => {
       </div>
     </Card>
   );
+
+  if (loading) {
+    return (
+      <>
+        <Navbar />
+        <div className="min-h-screen bg-background pt-20">
+          <div className="container mx-auto px-4 py-16">
+            <Card className="max-w-md mx-auto p-8 text-center">
+              <Loader2 className="w-8 h-8 mx-auto mb-4 animate-spin text-muted-foreground" />
+              <h2 className="text-xl font-bold mb-2">Loading your orders...</h2>
+              <p className="text-muted-foreground">Please wait while we fetch your bookings.</p>
+            </Card>
+          </div>
+        </div>
+        <Footer />
+      </>
+    );
+  }
 
   if (bookings.length === 0) {
     return (

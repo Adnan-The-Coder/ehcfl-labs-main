@@ -18,20 +18,17 @@ interface Props {
   onUpdate: (paymentMethod: string) => void;
   onConfirm: () => void;
   onBack: () => void;
+  isSubmitting?: boolean;
 }
 
-const ReviewStep = ({ bookingData, items, totalPrice, appliedCoupon, onUpdate, onConfirm, onBack }: Props) => {
+const ReviewStep = ({ bookingData, items, totalPrice, appliedCoupon, onUpdate, onConfirm, onBack, isSubmitting = false }: Props) => {
   const [paymentMethod, setPaymentMethod] = useState(bookingData.paymentMethod);
   const [agreedToTerms, setAgreedToTerms] = useState(false);
-  const [loading, setLoading] = useState(false);
 
   const handleConfirm = () => {
-    if (!agreedToTerms) return;
-    setLoading(true);
+    if (!agreedToTerms || isSubmitting) return;
     onUpdate(paymentMethod);
-    setTimeout(() => {
-      onConfirm();
-    }, 2000);
+    onConfirm();
   };
 
   const totalMRP = items.reduce((sum, item) => sum + item.originalPrice * item.quantity, 0);
@@ -147,11 +144,11 @@ const ReviewStep = ({ bookingData, items, totalPrice, appliedCoupon, onUpdate, o
       </div>
 
       <div className="flex justify-between pt-4">
-        <Button variant="outline" onClick={onBack} disabled={loading}>
+        <Button variant="outline" onClick={onBack} disabled={isSubmitting}>
           Back
         </Button>
-        <Button onClick={handleConfirm} disabled={!agreedToTerms || loading} size="lg">
-          {loading ? (
+        <Button onClick={handleConfirm} disabled={!agreedToTerms || isSubmitting} size="lg">
+          {isSubmitting ? (
             <>
               <Loader2 className="w-4 h-4 mr-2 animate-spin" />
               Processing...
