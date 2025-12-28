@@ -14,4 +14,8 @@ export const API_ENDPOINTS = {
     getBookingsByUserUUID: (userUuid: string) => `${API_BASE_URL}/bookings/user/${userUuid}`, // Fetch all bookings for a specific user
     updateBooking: (bookingId: string) => `${API_BASE_URL}/bookings/${bookingId}`, // Update a specific booking by booking ID
     deleteBooking: (bookingId: string) => `${API_BASE_URL}/bookings/${bookingId}`, // Delete a specific booking by booking ID
+
+    // Payment Endpoints
+    createOrder: `${API_BASE_URL}/payment/create-order`, // Create Razorpay order
+    verifyOrder: `${API_BASE_URL}/payment/verify-order`, // Verify Razorpay payment
 }

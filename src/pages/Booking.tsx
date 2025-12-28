@@ -14,6 +14,7 @@ import { CheckCircle2 } from 'lucide-react';
 import { supabase } from '@/utils/supabase/client';
 import { API_ENDPOINTS } from '@/config/api';
 import { useToast } from '@/hooks/use-toast';
+import { processRazorpayPayment } from '@/utils/razorpay';
 
 export interface Customer {
   name: string;
@@ -84,6 +85,48 @@ const Booking = () => {
     }
   };
 
+  const createBookingInDatabase = async (
+    userUuid: string,
+    bookingId: string,
+    paymentStatus: string,
+    paymentDetails?: { orderId: string; paymentId: string }
+  ) => {
+    const bookingPayload = {
+      booking_id: bookingId,
+      user_uuid: userUuid,
+      customers: bookingData.customers,
+      address: bookingData.address,
+      booking_date: bookingData.date,
+      time_slot: bookingData.timeSlot,
+      packages: items,
+      total_price: totalPrice,
+      coupon: appliedCoupon,
+      payment_method: bookingData.paymentMethod,
+      payment_status: paymentStatus,
+      status: 'confirmed',
+      ...(paymentDetails && {
+        razorpay_order_id: paymentDetails.orderId,
+        razorpay_payment_id: paymentDetails.paymentId,
+      }),
+    };
+
+    const response = await fetch(API_ENDPOINTS.createBooking, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(bookingPayload),
+    });
+
+    const result = await response.json();
+
+    if (!response.ok || !result.success) {
+      throw new Error(result.message || 'Failed to create booking');
+    }
+
+    return result;
+  };
+
   const handleConfirmBooking = async () => {
     setIsSubmitting(true);
     
@@ -104,59 +147,104 @@ const Booking = () => {
       const userUuid = session.user.id;
       const bookingId = `BKG${Date.now()}`;
       
-      // Prepare booking payload
-      const bookingPayload = {
-        booking_id: bookingId,
-        user_uuid: userUuid,
-        customers: bookingData.customers,
-        address: bookingData.address,
-        booking_date: bookingData.date,
-        time_slot: bookingData.timeSlot,
-        packages: items,
-        total_price: totalPrice,
-        coupon: appliedCoupon,
-        payment_method: bookingData.paymentMethod,
-        payment_status: 'pending',
-        status: 'confirmed',
-      };
+      // Check if online payment is selected
+      if (bookingData.paymentMethod === 'prepaid' || bookingData.paymentMethod === 'online') {
+        // Process Razorpay payment
+        const finalAmount = appliedCoupon 
+          ? totalPrice - appliedCoupon.discount 
+          : totalPrice;
+        const amountInPaise = Math.round(finalAmount * 100);
 
-      // Make API call to create booking
-      const response = await fetch(API_ENDPOINTS.createBooking, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(bookingPayload),
-      });
+        const primaryCustomer = bookingData.customers[0];
+        
+        await processRazorpayPayment(
+          amountInPaise,
+          userUuid,
+          {
+            name: primaryCustomer.name,
+            email: primaryCustomer.email,
+            phone: primaryCustomer.phone,
+          },
+          async (paymentDetails) => {
+            try {
+              // Payment successful - create booking with payment info
+              await createBookingInDatabase(
+                userUuid,
+                bookingId,
+                'completed',
+                paymentDetails
+              );
 
-      const result = await response.json();
+              clearCart();
+              
+              toast({
+                title: 'Payment Successful!',
+                description: `Your booking ID is ${bookingId}`,
+              });
 
-      if (!response.ok || !result.success) {
-        throw new Error(result.message || 'Failed to create booking');
-      }
-
-      // Clear cart and navigate to confirmation
-      clearCart();
-      
-      toast({
-        title: 'Booking Confirmed!',
-        description: `Your booking ID is ${bookingId}`,
-      });
-
-      navigate('/confirmation', { 
-        state: { 
-          bookingId, 
-          booking: {
-            id: bookingId,
-            ...bookingData,
-            packages: items,
-            totalPrice,
-            coupon: appliedCoupon,
-            status: 'confirmed',
-            createdAt: new Date().toISOString(),
+              navigate('/confirmation', { 
+                state: { 
+                  bookingId, 
+                  booking: {
+                    id: bookingId,
+                    ...bookingData,
+                    packages: items,
+                    totalPrice,
+                    coupon: appliedCoupon,
+                    status: 'confirmed',
+                    paymentStatus: 'completed',
+                    createdAt: new Date().toISOString(),
+                  }
+                } 
+              });
+            } catch (error) {
+              console.error('Booking creation after payment:', error);
+              toast({
+                variant: 'destructive',
+                title: 'Booking Failed',
+                description: 'Payment successful but booking creation failed. Please contact support with payment ID: ' + paymentDetails.paymentId,
+              });
+            } finally {
+              setIsSubmitting(false);
+            }
+          },
+          (error) => {
+            console.error('Payment error:', error);
+            toast({
+              variant: 'destructive',
+              title: 'Payment Failed',
+              description: error.message || 'Payment was not completed. Please try again.',
+            });
+            setIsSubmitting(false);
           }
-        } 
-      });
+        );
+      } else {
+        // Cash on delivery - create booking directly
+        await createBookingInDatabase(userUuid, bookingId, 'pending');
+
+        clearCart();
+        
+        toast({
+          title: 'Booking Confirmed!',
+          description: `Your booking ID is ${bookingId}`,
+        });
+
+        navigate('/confirmation', { 
+          state: { 
+            bookingId, 
+            booking: {
+              id: bookingId,
+              ...bookingData,
+              packages: items,
+              totalPrice,
+              coupon: appliedCoupon,
+              status: 'confirmed',
+              createdAt: new Date().toISOString(),
+            }
+          } 
+        });
+        setIsSubmitting(false);
+      }
     } catch (error) {
       console.error('Booking error:', error);
       toast({
@@ -164,7 +252,6 @@ const Booking = () => {
         title: 'Booking Failed',
         description: error instanceof Error ? error.message : 'An unexpected error occurred. Please try again.',
       });
-    } finally {
       setIsSubmitting(false);
     }
   };

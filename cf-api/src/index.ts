@@ -4,6 +4,7 @@ import { secureHeaders } from "hono/secure-headers";
 import { requestId } from "hono/request-id";
 import userRoutes from "./routes/user.auth";
 import bookingRoutes from "./routes/bookings";
+import paymentRoutes from "./routes/payment";
 
 interface CloudflareBindings {
   ENVIRONMENT?: string;
@@ -14,6 +15,8 @@ interface CloudflareBindings {
   ENABLE_PERFORMANCE_MONITORING?: string;
   JWT_SECRET?: string;
   DATABASE_URL?: string;
+  RAZORPAY_LIVE_KEY_ID?: string;
+  RAZORPAY_LIVE_KEY_SECRET?: string;
 }
 
 interface HealthStatus {
@@ -186,5 +189,6 @@ app.get("/message", (c) => {
 
 app.route('/users', userRoutes);
 app.route('/bookings', bookingRoutes);
+app.route('/payment', paymentRoutes);
 
 export default app;
