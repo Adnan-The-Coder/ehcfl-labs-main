@@ -44,8 +44,9 @@ jobs:
           VITE_PUBLIC_SUPABASE_URL: ${{ secrets.VITE_PUBLIC_SUPABASE_URL }}
           VITE_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.VITE_PUBLIC_SUPABASE_ANON_KEY }}
         run: |
-          wrangler pages secrets put VITE_PUBLIC_SUPABASE_URL --env production --value "$VITE_PUBLIC_SUPABASE_URL"
-          wrangler pages secrets put VITE_PUBLIC_SUPABASE_ANON_KEY --env production --value "$VITE_PUBLIC_SUPABASE_ANON_KEY"
+          wrangler pages secret put VITE_PUBLIC_SUPABASE_URL --project-name "$PROJECT_NAME" --env production
+          wrangler pages secret put VITE_PUBLIC_SUPABASE_ANON_KEY --project-name "$PROJECT_NAME" --env production
+
 
       - name: Ensure Cloudflare Pages project exists
         env:
