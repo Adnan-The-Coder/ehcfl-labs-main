@@ -75,7 +75,7 @@ jobs:
       #     else
       #       echo "🚀 Creating Pages project"
       #       wrangler pages project create "$PROJECT_NAME" --production-branch=main
-          fi
+          # fi
 
       # Deploy to Cloudflare Pages
       - name: Deploy to Cloudflare Pages
