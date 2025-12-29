@@ -52,10 +52,18 @@ jobs:
         run: |
           ls -alh dist
 
-      # Install Wrangler globally (since it's required for deployment)
+      # Install Wrangler CLI globally (since it's required for deployment)
       - name: Install Wrangler CLI
         run: |
           npm install -g wrangler
+
+      # Ensure the Cloudflare API Token has the correct permissions
+      - name: Verify Cloudflare API Token
+        run: |
+          # Use wrangler to check if the token is valid
+          wrangler whoami
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
 
       # Deploy to Cloudflare Pages
       - name: Deploy to Cloudflare Pages
