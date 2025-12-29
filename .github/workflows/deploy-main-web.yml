@@ -37,6 +37,16 @@ jobs:
       - name: Setup Wrangler
         run: bun add -g wrangler
 
+      - name: Update Cloudflare Pages secrets (Environment Variables)
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          VITE_PUBLIC_SUPABASE_URL: ${{ secrets.VITE_PUBLIC_SUPABASE_URL }}
+          VITE_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.VITE_PUBLIC_SUPABASE_ANON_KEY }}
+        run: |
+          wrangler pages secrets put VITE_PUBLIC_SUPABASE_URL --env production --value "$VITE_PUBLIC_SUPABASE_URL"
+          wrangler pages secrets put VITE_PUBLIC_SUPABASE_ANON_KEY --env production --value "$VITE_PUBLIC_SUPABASE_ANON_KEY"
+
       - name: Ensure Cloudflare Pages project exists
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
