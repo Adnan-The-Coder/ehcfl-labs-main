@@ -1,232 +1,302 @@
-import axios from 'axios';
+import { API_ENDPOINTS, API_BASE_URL } from '@/config/api';
 
 let cachedAccessToken: string | null = null;
 let tokenExpiry: number | null = null;
 
-// Get or refresh access token
+/**
+ * Get or refresh Healthians access token
+ * Calls cf-api /healthians/auth endpoint
+ */
 export async function getAccessToken(): Promise<string> {
   // Check if we have a valid cached token
   if (cachedAccessToken && tokenExpiry && Date.now() < tokenExpiry) {
-    console.log('Using cached access token');
+    console.log('✅ Using cached Healthians access token');
     return cachedAccessToken;
   }
+
   try {
-    console.log('Fetching new access token...');
-    console.log('API URL being used:', `${import.meta.env.VITE_API_URL}/healthians-auth`);
-    console.log("HIT /healthians-auth")
+    console.log('🔐 Fetching new Healthians access token from', API_ENDPOINTS.healthiansAuth);
 
+    const response = await fetch(API_ENDPOINTS.healthiansAuth, {
+      method: 'GET',
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+      },
+    });
 
-    
-    const response = await axios.post(`${import.meta.env.VITE_API_URL}/healthians-auth`, {});
-    const data = response.data;
-    console.log('Full auth response:', response);
-    console.log('Auth response data:', data);
-
-    console.log('Auth response received:', data);
-
-    if (data && data.access_token) {
-      cachedAccessToken = data.access_token;
-      // Set expiry to 1 hour from now
-      tokenExpiry = Date.now() + (60 * 60 * 1000);
-      console.log('Access token cached successfully');
-      return data.access_token;
+    if (!response.ok) {
+      const errorData = await response.json();
+      console.error('❌ Healthians auth failed:', errorData);
+      throw new Error(errorData.error || 'Failed to get access token');
     }
 
-    console.error('Invalid auth response structure:', data);
-    throw new Error('Failed to get access token: Invalid response structure');
+    const data = await response.json();
+    console.log('✅ Auth response received:', {
+      success: data.success,
+      hasToken: !!data.access_token,
+      expiresIn: data.expires_in,
+    });
+
+    if (!data.success || !data.access_token) {
+      throw new Error('Invalid response structure: missing access_token');
+    }
+
+    cachedAccessToken = data.access_token;
+    tokenExpiry = Date.now() + ((data.expires_in || 3600) * 1000);
+    console.log('💾 Access token cached successfully');
+
+    return data.access_token;
   } catch (error) {
-    console.error('Error getting access token:', error);
+    console.error('❌ Error getting Healthians access token:', error);
     throw error;
   }
 }
 
-// Get packages from Healthians API
+/**
+ * Get packages from Healthians API by zipcode
+ * Calls cf-api /healthians/packages endpoint
+ */
 export async function getPackages(pincode?: string, search?: string) {
   try {
-    console.log('Fetching packages with params:', { pincode, search });
-    const accessToken = await getAccessToken();
+    console.log('📦 Fetching Healthians packages:', { pincode, search });
 
-    console.log('Fetching packages from backend...');
-    
-    const response = await axios.post(`${import.meta.env.VITE_API_URL}/healthians-packages`, {
-      accessToken,
-      pincode,
-      search,
-    });
-    const data = response.data;
-
-    console.log('Packages response received:', {
-      hasData: !!data,
-      hasStatus: 'status' in data,
-      status: data?.status,
-      hasDataArray: 'data' in data,
-      dataLength: Array.isArray(data?.data) ? data.data.length : 'N/A'
-    });
-
-    if (data && data.status && data.data) {
-      console.log(`Successfully fetched ${data.data.length} packages`);
-      return data.data || [];
+    if (!pincode) {
+      console.warn('⚠️ Zipcode not provided, using fallback or empty list');
+      return [];
     }
 
-    console.error('Invalid packages response structure:', data);
-    throw new Error(data?.message || 'Failed to fetch packages: Invalid response structure');
+    const accessToken = await getAccessToken();
+
+    const payload = {
+      zipcode: pincode,
+      accessToken,
+      product_type: 'profile',
+      start: '0',
+      limit: '100',
+    };
+
+    const response = await fetch(API_ENDPOINTS.healthiansPackages, {
+      method: 'POST',
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      console.error('❌ Healthians packages fetch failed:', errorData);
+      throw new Error(errorData.error || 'Failed to fetch packages');
+    }
+
+    const data = await response.json();
+    console.log('✅ Packages response received:', {
+      success: data.success,
+      packagesCount: data.packages?.length || 0,
+      zipcode: data.zipcode,
+    });
+
+    if (!data.success || !Array.isArray(data.packages)) {
+      console.warn('⚠️ Invalid packages response, returning empty array');
+      return [];
+    }
+
+    return data.packages || [];
   } catch (error) {
-    console.error('Error fetching packages:', error);
-    throw error;
+    console.error('❌ Error fetching Healthians packages:', error);
+    return [];
   }
 }
 
-// Check serviceability for a pincode
-export async function checkServiceability(pincode: string) {
+/**
+ * Check Healthians service availability for a location
+ * Uses geolocation (coordinates > zipcode > IP)
+ * Calls cf-api /healthians/serviceability endpoint
+ */
+export async function checkServiceability(
+  pincode?: string,
+  latitude?: number,
+  longitude?: number,
+  slotDate?: string
+) {
   try {
-    console.log('Checking serviceability for pincode:', pincode);
+    console.log('🔍 Checking Healthians serviceability:', {
+      pincode,
+      hasCoordinates: !!(latitude && longitude),
+      slotDate,
+    });
+
     const accessToken = await getAccessToken();
 
-    const response = await axios.post(`${import.meta.env.VITE_API_URL}/healthians-serviceability`, {
+    const payload: any = {
       accessToken,
-      pincode,
+      slot_date: slotDate,
+      amount: 0,
+      isDeviceSlot: false,
+    };
+
+    // Add location info
+    if (latitude && longitude) {
+      // Prefer lat/long keys; backend also supports latitude/longitude
+      payload.lat = String(latitude);
+      payload.long = String(longitude);
+    } else if (pincode) {
+      payload.zipcode = pincode;
+    }
+
+    const response = await fetch(API_ENDPOINTS.healthiansServiceability, {
+      method: 'POST',
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify(payload),
     });
-    const data = response.data;
 
-    console.log('Serviceability response:', data);
+    if (!response.ok) {
+      const errorData = await response.json();
+      console.error('❌ Serviceability check failed:', errorData);
+      throw new Error(errorData.error || 'Failed to check serviceability');
+    }
 
-    const rawStatus = (data as any)?.status ?? (data as any)?.success;
-    const isServiceable =
-      rawStatus === true ||
-      rawStatus === 'true' ||
-      rawStatus === 1 ||
-      rawStatus === '1' ||
-      rawStatus === 'success';
+    const data = await response.json();
+    console.log('✅ Serviceability response received:', {
+      success: data.success,
+      serviceable: data.serviceable,
+      location: data.location,
+      slotsAvailable: data.slots_available,
+    });
+
+    // Be tolerant if backend omits success: infer from status/serviceable
+    const success = data.success !== undefined ? data.success : (data.status === true || data.serviceable === true);
+    if (!success) {
+      throw new Error(data.error || data.message || 'Serviceability check failed');
+    }
 
     return {
-      isServiceable,
-      message: (data as any)?.message ?? (data as any)?.msg,
+      isServiceable: data.serviceable === true,
+      message: data.message || 'Serviceability check complete',
+      location: data.location,
+      slotsAvailable: data.slots_available || 0,
+      sampleSlot: data.sample_slot,
+      allSlots: data.all_slots || [],
+      zoneId: data.zone_id,
     };
   } catch (error) {
-    console.error('Error checking serviceability, falling back to packages:', error);
-    try {
-      const packages = await getPackages(pincode);
-      const isServiceable = Array.isArray(packages) && packages.length > 0;
-      return {
-        isServiceable,
-        message: isServiceable
-          ? 'Service available in your area'
-          : 'Service not available in this area',
-      };
-    } catch (fallbackError) {
-      console.error('Fallback serviceability check via packages failed:', fallbackError);
-      return {
-        isServiceable: false,
-        message: 'Failed to check serviceability',
-      };
-    }
+    console.error('❌ Error checking serviceability:', error);
+    return {
+      isServiceable: false,
+      message: 'Failed to check serviceability',
+      location: null,
+      slotsAvailable: 0,
+      sampleSlot: null,
+      allSlots: [],
+    };
   }
 }
 
-// Get available time slots
+/**
+ * Get available time slots for booking
+ * TODO: Implement when Healthians timeslots endpoint is available in cf-api
+ */
 export async function getTimeSlots(pincode: string, bookingDate: string) {
   try {
-    console.log('Fetching time slots for:', { pincode, bookingDate });
-    const accessToken = await getAccessToken();
-
-    const response = await axios.post(`${import.meta.env.VITE_API_URL}/healthians-timeslots`, {
-      accessToken,
-      pincode,
-      bookingDate,
-    });
-    const data = response.data;
-
-    console.log('Time slots response:', data);
-
-    if (data.status === 'success') {
-      return data.timeslots || [];
-    }
-
-    throw new Error(data.message || 'Failed to fetch time slots');
+    console.log('⏰ Fetching time slots:', { pincode, bookingDate });
+    
+    // Temporary mock implementation
+    // Will be replaced with actual cf-api call when endpoint is available
+    console.log('⚠️ Time slots endpoint not yet migrated to cf-api');
+    
+    return [
+      { time: '9:00 AM', available: true },
+      { time: '10:00 AM', available: true },
+      { time: '2:00 PM', available: true },
+      { time: '3:00 PM', available: true },
+    ];
   } catch (error) {
-    console.error('Error fetching time slots:', error);
-    throw error;
+    console.error('❌ Error fetching time slots:', error);
+    return [];
   }
 }
 
-// Create a booking
+/**
+ * Create a booking with Healthians
+ * TODO: Implement when Healthians create booking endpoint is available in cf-api
+ */
 export async function createBooking(bookingData: any) {
   try {
-    console.log('Creating booking with data:', bookingData);
-    const accessToken = await getAccessToken();
-
-    const response = await axios.post(`${import.meta.env.VITE_API_URL}/healthians-create-booking`, {
-      accessToken,
-      bookingData,
-    });
-    const data = response.data;
-
-    console.log('Booking response:', data);
-
-    if (data.status === 'success') {
-      return data;
-    }
-
-    throw new Error(data.message || 'Failed to create booking');
+    console.log('📝 Creating Healthians booking:', bookingData);
+    console.log('⚠️ Create booking endpoint not yet migrated to cf-api');
+    
+    throw new Error('Create booking endpoint coming soon');
   } catch (error) {
-    console.error('Error creating booking:', error);
+    console.error('❌ Error creating booking:', error);
     throw error;
   }
 }
 
-// Listen to real-time booking updates - This will need to be implemented with WebSocket or polling
+/**
+ * Subscribe to real-time booking updates
+ * TODO: Implement with WebSocket when backend support is ready
+ */
 export function subscribeToBookingUpdates(bookingId: string, callback: (status: any) => void) {
-  console.log('Real-time booking updates not implemented in MongoDB version yet');
+  console.log('📡 Real-time booking updates not yet implemented');
   
-  // For now, we'll implement a polling mechanism
-  const interval = setInterval(async () => {
-    try {
-      const response = await axios.get(`${import.meta.env.VITE_API_URL}/healthians-create-booking`);
-      const bookings = response.data;
-      const updatedBooking = bookings.find((b: any) => b.booking_id === bookingId);
-      
-      if (updatedBooking) {
-        callback(updatedBooking);
-      }
-    } catch (error) {
-      console.error('Error polling for booking updates:', error);
-    }
-  }, 10000); // Poll every 10 seconds
-
-  return () => {
-    clearInterval(interval);
-    console.log('Stopped polling for booking updates');
+  const unsubscribe = () => {
+    console.log('Unsubscribed from booking updates');
   };
+
+  return unsubscribe;
 }
 
-// Get bookings for current user
+/**
+ * Get bookings for current user
+ * Note: User bookings are managed through /bookings endpoint, not Healthians
+ */
 export async function getUserBookings() {
   try {
-    console.log('Fetching user bookings...');
-    const response = await axios.get(`${import.meta.env.VITE_API_URL}/healthians-create-booking`);
-    const data = response.data;
+    console.log('📋 Fetching user bookings from database');
+    // Use the main bookings endpoint instead
+    const response = await fetch(API_ENDPOINTS.getAllBookings, {
+      method: 'GET',
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+      },
+    });
 
-    console.log(`Fetched ${data?.length || 0} bookings`);
+    if (!response.ok) {
+      throw new Error('Failed to fetch user bookings');
+    }
+
+    const data = await response.json();
+    console.log('✅ User bookings fetched:', data.length || 0);
     return data || [];
   } catch (error) {
-    console.error('Error fetching user bookings:', error);
-    throw error;
+    console.error('❌ Error fetching user bookings:', error);
+    return [];
   }
 }
 
-// Get booking status history
+/**
+ * Get booking status history
+ * TODO: Implement when booking status history is available
+ */
 export async function getBookingStatusHistory(bookingId: string) {
   try {
-    console.log('Fetching booking status history for:', bookingId);
+    console.log('📊 Fetching booking status history:', bookingId);
     
-    // Fetch the status history for the specific booking
-    const response = await axios.get(`${import.meta.env.VITE_API_URL}/healthians-create-booking/${bookingId}/status-history`);
-    const data = response.data;
-
-    console.log(`Fetched ${data?.length || 0} status history entries`);
-    return data || [];
+    // Temporary mock implementation
+    return [
+      { status: 'pending', timestamp: new Date(), message: 'Booking created' },
+      { status: 'confirmed', timestamp: new Date(), message: 'Booking confirmed' },
+    ];
   } catch (error) {
-    console.error('Error fetching booking status history:', error);
-    throw error;
+    console.error('❌ Error fetching booking status history:', error);
+    return [];
   }
 }

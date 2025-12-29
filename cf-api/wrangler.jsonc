@@ -16,7 +16,11 @@
 		"enabled": true
 	},
 	"vars": {
-    "ENVIRONMENT": "development"
+    "ENVIRONMENT": "development",
+    "HEALTHIANS_BASE_URL": "https://app.healthians.com",
+    "HEALTHIANS_PARTNER_NAME": "externalpartnername",
+    "HEALTHIANS_USERNAME": "username",
+    "HEALTHIANS_PASSWORD": "password"
   },
   "d1_databases": [  // Optional: keep dev config here
     {
@@ -29,7 +33,11 @@
   "env": {
     "production": {
       "vars": {
-        "ENVIRONMENT": "production"
+        "ENVIRONMENT": "production",
+        "HEALTHIANS_BASE_URL": "https://app.healthians.com",
+        "HEALTHIANS_PARTNER_NAME": "externalpartnername",
+        "HEALTHIANS_USERNAME": "username",
+        "HEALTHIANS_PASSWORD": "password"
       },
       "d1_databases": [
         {
@@ -42,7 +50,11 @@
     },
     "staging": {
       "vars": {
-        "ENVIRONMENT": "staging"
+        "ENVIRONMENT": "staging",
+        "HEALTHIANS_BASE_URL": "https://app.healthians.com",
+        "HEALTHIANS_PARTNER_NAME": "externalpartnername",
+        "HEALTHIANS_USERNAME": "username",
+        "HEALTHIANS_PASSWORD": "password"
       },
       "d1_databases": [
         {

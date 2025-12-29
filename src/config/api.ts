@@ -1,7 +1,7 @@
 export const API_BASE_URL = import.meta.env.VITE_BACKEND_API_BASE_URL || 'http://127.0.0.1:8787';
 
 export const API_ENDPOINTS = {
-    // userProfile Endpoints 
+    // User Profile Endpoints 
     createProfile: `${API_BASE_URL}/users`, // Creating a new user profile
     getAllProfiles: `${API_BASE_URL}/users`, // Fetching all userProfiles
     getProfileByUUID: (uuid: string) => `${API_BASE_URL}/users/${uuid}`, // Fetching a specific userProfile by uuid
@@ -18,4 +18,9 @@ export const API_ENDPOINTS = {
     // Payment Endpoints
     createOrder: `${API_BASE_URL}/payment/create-order`, // Create Razorpay order
     verifyOrder: `${API_BASE_URL}/payment/verify-order`, // Verify Razorpay payment
+
+    // Healthians API Endpoints
+    healthiansAuth: `${API_BASE_URL}/healthians/auth`, // Get Healthians access token
+    healthiansPackages: `${API_BASE_URL}/healthians/packages`, // Get packages by zipcode
+    healthiansServiceability: `${API_BASE_URL}/healthians/serviceability`, // Check service availability
 }

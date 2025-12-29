@@ -5,19 +5,8 @@ import { requestId } from "hono/request-id";
 import userRoutes from "./routes/user.auth";
 import bookingRoutes from "./routes/bookings";
 import paymentRoutes from "./routes/payment";
-
-interface CloudflareBindings {
-  ENVIRONMENT?: string;
-  API_VERSION?: string;
-  API_BASE_URL?: string;
-  LOG_LEVEL?: string;
-  ENABLE_DETAILED_LOGGING?: string;
-  ENABLE_PERFORMANCE_MONITORING?: string;
-  JWT_SECRET?: string;
-  DATABASE_URL?: string;
-  RAZORPAY_LIVE_KEY_ID?: string;
-  RAZORPAY_LIVE_KEY_SECRET?: string;
-}
+import healthiansRoutes from "./routes/healthians";
+import type { CloudflareBindings } from "./types";
 
 interface HealthStatus {
   status: "healthy" | "unhealthy";
@@ -190,5 +179,6 @@ app.get("/message", (c) => {
 app.route('/users', userRoutes);
 app.route('/bookings', bookingRoutes);
 app.route('/payment', paymentRoutes);
+app.route('/healthians', healthiansRoutes);
 
 export default app;
