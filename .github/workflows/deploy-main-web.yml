@@ -52,17 +52,17 @@ jobs:
         run: |
           ls -alh dist
 
-      # Update Cloudflare Pages secrets (Environment Variables)
-      - name: Update Cloudflare Pages secrets (Environment Variables)
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          VITE_PUBLIC_SUPABASE_URL: ${{ secrets.VITE_PUBLIC_SUPABASE_URL }}
-          VITE_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.VITE_PUBLIC_SUPABASE_ANON_KEY }}
-        run: |
+      # Update Cloudflare Pages secrets (Environment Variables) (Already step up so, not needed here again)
+      # - name: Update Cloudflare Pages secrets (Environment Variables)
+        # env:
+          # CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          # CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          # VITE_PUBLIC_SUPABASE_URL: ${{ secrets.VITE_PUBLIC_SUPABASE_URL }}
+          # VITE_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.VITE_PUBLIC_SUPABASE_ANON_KEY }}
+        # run: |
           # Only if needed to update Cloudflare Pages secrets using Wrangler
-          wrangler pages secret put VITE_PUBLIC_SUPABASE_URL --project-name "$PROJECT_NAME" --env production
-          wrangler pages secret put VITE_PUBLIC_SUPABASE_ANON_KEY --project-name "$PROJECT_NAME" --env production
+          # wrangler pages secret put VITE_PUBLIC_SUPABASE_URL --project-name "$PROJECT_NAME" --env production
+          # wrangler pages secret put VITE_PUBLIC_SUPABASE_ANON_KEY --project-name "$PROJECT_NAME" --env production
 
       # Ensure the Cloudflare Pages project exists (check for the correct project)
       - name: Ensure Cloudflare Pages project exists
