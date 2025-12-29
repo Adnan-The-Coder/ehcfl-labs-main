@@ -65,16 +65,16 @@ jobs:
           # wrangler pages secret put VITE_PUBLIC_SUPABASE_ANON_KEY --project-name "$PROJECT_NAME" --env production
 
       # Ensure the Cloudflare Pages project exists (check for the correct project)
-      - name: Ensure Cloudflare Pages project exists
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: |
-          if wrangler pages project list | grep -q "$PROJECT_NAME"; then
-            echo "✅ Pages project already exists"
-          else
-            echo "🚀 Creating Pages project"
-            wrangler pages project create "$PROJECT_NAME" --production-branch=main
+      # - name: Ensure Cloudflare Pages project exists
+      #   env:
+      #     CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      #     CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      #   run: |
+      #     if wrangler pages project list | grep -q "$PROJECT_NAME"; then
+      #       echo "✅ Pages project already exists"
+      #     else
+      #       echo "🚀 Creating Pages project"
+      #       wrangler pages project create "$PROJECT_NAME" --production-branch=main
           fi
 
       # Deploy to Cloudflare Pages
