@@ -224,20 +224,146 @@ export async function getTimeSlots(pincode: string, bookingDate: string) {
 }
 
 /**
- * Create a booking with Healthians
- * TODO: Implement when Healthians create booking endpoint is available in cf-api
+ * Create a booking with Healthians createBooking_v3 API
+ * Sends booking data to cf-api which calls Healthians and stores in DB
  */
-export async function createBooking(bookingData: any) {
+export async function createHealthiansBooking(bookingData: any) {
   try {
-    console.log('📝 Creating Healthians booking:', bookingData);
-    console.log('⚠️ Create booking endpoint not yet migrated to cf-api');
-    
-    throw new Error('Create booking endpoint coming soon');
+    console.log('📝 Creating Healthians booking via cf-api:', {
+      vendor_booking_id: bookingData.vendor_booking_id,
+      customers: bookingData.customer?.length,
+      packages: bookingData.package?.length,
+    });
+
+    if (!bookingData.vendor_booking_id || !bookingData.customer || !bookingData.package) {
+      throw new Error('Missing required booking fields');
+    }
+
+    const accessToken = await getAccessToken();
+
+    const payload = {
+      ...bookingData,
+      access_token: accessToken,
+    };
+
+    const response = await fetch(API_ENDPOINTS.healthiansBooking, {
+      method: 'POST',
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      console.error('❌ Healthians booking creation failed:', errorData);
+      throw new Error(errorData.message || 'Failed to create booking');
+    }
+
+    const data = await response.json();
+    console.log('✅ Booking created successfully:', {
+      booking_id: data.booking_id,
+      healthians_booking_id: data.healthians_response?.booking_id,
+      database_id: data.database_record?.id,
+    });
+
+    return {
+      success: true,
+      booking_id: data.booking_id,
+      healthians_response: data.healthians_response,
+      database_record: data.database_record,
+      message: data.message,
+    };
   } catch (error) {
-    console.error('❌ Error creating booking:', error);
-    throw error;
+    console.error('❌ Error creating Healthians booking:', error);
+    return {
+      success: false,
+      message: error instanceof Error ? error.message : 'Failed to create booking',
+      error,
+    };
   }
 }
+
+/**
+ * Get booking details from Healthians database
+ */
+export async function getHealthiansBookingDetails(bookingId: string) {
+  try {
+    console.log('🔍 Fetching Healthians booking details:', bookingId);
+
+    const response = await fetch(API_ENDPOINTS.healthiansBookingDetail(bookingId), {
+      method: 'GET',
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      console.error('❌ Booking fetch failed:', errorData);
+      throw new Error(errorData.message || 'Failed to fetch booking');
+    }
+
+    const data = await response.json();
+    console.log('✅ Booking details fetched:', data.data);
+
+    return {
+      success: true,
+      data: data.data,
+      message: data.message,
+    };
+  } catch (error) {
+    console.error('❌ Error fetching booking details:', error);
+    return {
+      success: false,
+      message: error instanceof Error ? error.message : 'Failed to fetch booking',
+      error,
+    };
+  }
+}
+
+/**
+ * Cancel a Healthians booking
+ */
+export async function cancelHealthiansBooking(bookingId: string) {
+  try {
+    console.log('🚫 Cancelling Healthians booking:', bookingId);
+
+    const response = await fetch(API_ENDPOINTS.healthiansBookingCancel(bookingId), {
+      method: 'PATCH',
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      console.error('❌ Booking cancellation failed:', errorData);
+      throw new Error(errorData.message || 'Failed to cancel booking');
+    }
+
+    const data = await response.json();
+    console.log('✅ Booking cancelled:', data);
+
+    return {
+      success: true,
+      message: data.message,
+      booking_id: data.booking_id,
+    };
+  } catch (error) {
+    console.error('❌ Error cancelling booking:', error);
+    return {
+      success: false,
+      message: error instanceof Error ? error.message : 'Failed to cancel booking',
+      error,
+    };
+  }
+}
+
 
 /**
  * Subscribe to real-time booking updates

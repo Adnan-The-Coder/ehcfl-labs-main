@@ -64,7 +64,7 @@ app.use(
   cors({
     origin: (origin) =>
       !origin || ALLOWED_ORIGINS.has(origin) ? origin ?? "*" : "",
-    allowHeaders: ["Content-Type", "Authorization"],
+    allowHeaders: ["Content-Type", "Authorization", "X-Access-Token"],
     allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     credentials: true,
     maxAge: 86400,

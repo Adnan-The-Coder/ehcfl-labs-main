@@ -20,7 +20,8 @@
     "HEALTHIANS_BASE_URL": "https://app.healthians.com",
     "HEALTHIANS_PARTNER_NAME": "externalpartnername",
     "HEALTHIANS_USERNAME": "username",
-    "HEALTHIANS_PASSWORD": "password"
+    "HEALTHIANS_PASSWORD": "password",
+    "HEALTHIANS_CHECKSUM_SECRET": "your-checksum-secret-key"
   },
   "d1_databases": [  // Optional: keep dev config here
     {
@@ -37,7 +38,8 @@
         "HEALTHIANS_BASE_URL": "https://app.healthians.com",
         "HEALTHIANS_PARTNER_NAME": "externalpartnername",
         "HEALTHIANS_USERNAME": "username",
-        "HEALTHIANS_PASSWORD": "password"
+        "HEALTHIANS_PASSWORD": "password",
+        "HEALTHIANS_CHECKSUM_SECRET": "your-checksum-secret-key"
       },
       "d1_databases": [
         {
@@ -54,7 +56,8 @@
         "HEALTHIANS_BASE_URL": "https://app.healthians.com",
         "HEALTHIANS_PARTNER_NAME": "externalpartnername",
         "HEALTHIANS_USERNAME": "username",
-        "HEALTHIANS_PASSWORD": "password"
+        "HEALTHIANS_PASSWORD": "password",
+        "HEALTHIANS_CHECKSUM_SECRET": "your-checksum-secret-key"
       },
       "d1_databases": [
         {

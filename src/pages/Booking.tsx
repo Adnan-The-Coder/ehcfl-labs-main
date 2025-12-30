@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useCart } from '@/contexts/CartContext';
+import { usePincode } from '@/contexts/PincodeContext';
 import { Navbar } from '@/components/Navbar';
 import { Footer } from '@/components/Footer';
 import { Card } from '@/components/ui/card';
@@ -15,6 +16,8 @@ import { supabase } from '@/utils/supabase/client';
 import { API_ENDPOINTS } from '@/config/api';
 import { useToast } from '@/hooks/use-toast';
 import { processRazorpayPayment } from '@/utils/razorpay';
+import { getAccessToken, createHealthiansBooking, checkServiceability } from '@/services/healthiansApi';
+import { logDateDebug, logServiceabilityRequest } from '@/utils/debugUtils';
 
 export interface Customer {
   name: string;
@@ -40,6 +43,7 @@ export interface BookingData {
   date: string;
   timeSlot: string;
   paymentMethod: string;
+  zone_id?: string;
 }
 
 const steps = [
@@ -53,6 +57,7 @@ const Booking = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { items, totalPrice, clearCart } = useCart();
+  const { pincode } = usePincode();
   const appliedCoupon = location.state?.appliedCoupon || null;
   const { toast } = useToast();
 
@@ -65,16 +70,56 @@ const Booking = () => {
     timeSlot: '',
     paymentMethod: 'prepaid',
   });
+  const [healthiansBookingResponse, setHealthiansBookingResponse] = useState<Record<string, unknown> | null>(null);
 
   if (items.length === 0) {
     navigate('/cart');
     return null;
   }
 
-  const handleNext = () => {
+  const handleNext = async () => {
     if (currentStep < 4) {
-      setCurrentStep(currentStep + 1);
-      window.scrollTo({ top: 0, behavior: 'smooth' });
+      // If moving from Address (step 2) to Date & Time (step 3), verify pincode and get zone_id
+      if (currentStep === 2 && bookingData.address?.pinCode) {
+        try {
+          setIsSubmitting(true);
+          console.log('🔍 Verifying pincode:', bookingData.address.pinCode);
+          
+          const serviceabilityResult = await checkServiceability(
+            bookingData.address?.pinCode || ''
+          );
+
+          if (!serviceabilityResult.isServiceable) {
+            toast({
+              variant: 'destructive',
+              title: 'Location Not Serviceable',
+              description: serviceabilityResult.message || 'This location is not serviceable for booking',
+            });
+            setIsSubmitting(false);
+            return;
+          }
+
+          // Store zone_id for later use in slots endpoint
+          const zoneId = serviceabilityResult.zoneId;
+          setBookingData({ ...bookingData, zone_id: zoneId });
+          console.log('✅ Zone ID obtained:', zoneId);
+          
+          setCurrentStep(currentStep + 1);
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+          setIsSubmitting(false);
+        } catch (error) {
+          console.error('❌ Serviceability check failed:', error);
+          toast({
+            variant: 'destructive',
+            title: 'Verification Failed',
+            description: error instanceof Error ? error.message : 'Could not verify location',
+          });
+          setIsSubmitting(false);
+        }
+      } else {
+        setCurrentStep(currentStep + 1);
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      }
     }
   };
 
@@ -85,52 +130,15 @@ const Booking = () => {
     }
   };
 
-  const createBookingInDatabase = async (
-    userUuid: string,
-    bookingId: string,
-    paymentStatus: string,
-    paymentDetails?: { orderId: string; paymentId: string }
-  ) => {
-    const bookingPayload = {
-      booking_id: bookingId,
-      user_uuid: userUuid,
-      customers: bookingData.customers,
-      address: bookingData.address,
-      booking_date: bookingData.date,
-      time_slot: bookingData.timeSlot,
-      packages: items,
-      total_price: totalPrice,
-      coupon: appliedCoupon,
-      payment_method: bookingData.paymentMethod,
-      payment_status: paymentStatus,
-      status: 'confirmed',
-      ...(paymentDetails && {
-        razorpay_order_id: paymentDetails.orderId,
-        razorpay_payment_id: paymentDetails.paymentId,
-      }),
-    };
-
-    const response = await fetch(API_ENDPOINTS.createBooking, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(bookingPayload),
-    });
-
-    const result = await response.json();
-
-    if (!response.ok || !result.success) {
-      throw new Error(result.message || 'Failed to create booking');
-    }
-
-    return result;
-  };
-
   const handleConfirmBooking = async () => {
     setIsSubmitting(true);
     
     try {
+      // Debug logging
+      console.log('📋 Booking Confirmation Starting...');
+      logDateDebug();
+      console.log('📅 Selected Date:', bookingData.date);
+      
       // Get current user session
       const { data: { session }, error: sessionError } = await supabase.auth.getSession();
       
@@ -145,18 +153,99 @@ const Booking = () => {
       }
 
       const userUuid = session.user.id;
-      const bookingId = `BKG${Date.now()}`;
+      const primaryCustomer = bookingData.customers[0];
       
-      // Check if online payment is selected
+      // Use zone_id obtained during address verification (step 2)
+      if (!bookingData.zone_id) {
+        toast({
+          variant: 'destructive',
+          title: 'Location Verification Required',
+          description: 'Please go back and verify your address to proceed.',
+        });
+        setIsSubmitting(false);
+        return;
+      }
+
+      const zoneId = bookingData.zone_id;
+
+      console.log('✅ Using verified zone_id:', zoneId);
+      
+      // Prepare Healthians booking payload
+      const discountedPrice = appliedCoupon ? totalPrice - appliedCoupon.discount : totalPrice;
+      
+      // Parse slot_id from selected time slot (format: "HH:MM-HH:MM|stm_id")
+      const slotParts = bookingData.timeSlot.split('|');
+      const slotId = slotParts[1] || slotParts[0];
+      
+      const healthiansPayload = {
+        customer: bookingData.customers.map((cust, idx) => ({
+          customer_id: `CUST-${userUuid.substring(0, 12)}-${idx}`,
+          customer_name: cust.name.toUpperCase(),
+          relation: idx === 0 ? 'self' : 'family',
+          age: parseInt(cust.age),
+          dob: cust.email || '', // Using email as placeholder; adjust if you have DOB field
+          gender: cust.gender === 'Male' ? 'M' : cust.gender === 'Female' ? 'F' : 'O',
+          contact_number: cust.phone,
+          email: cust.email,
+          application_number: `APP-${Date.now()}`,
+          customer_remarks: '',
+        })),
+        slot: {
+          slot_id: slotId,
+        },
+        package: [
+          {
+            deal_id: items.map(item => item.id),
+          },
+        ],
+        customer_calling_number: primaryCustomer.phone,
+        billing_cust_name: primaryCustomer.name.toUpperCase(),
+        gender: primaryCustomer.gender === 'Male' ? 'M' : primaryCustomer.gender === 'Female' ? 'F' : 'O',
+        mobile: primaryCustomer.phone,
+        email: primaryCustomer.email,
+        state: 26, // Default to Haryana (adjust as needed)
+        cityId: 23, // Default to Gurgaon (adjust as needed)
+        sub_locality: `${bookingData.address?.line1}, ${bookingData.address?.locality}`,
+        latitude: String(28.5088974), // Default Gurgaon coords
+        longitude: String(77.0750786),
+        address: bookingData.address?.line1 || 'Address',
+        zipcode: bookingData.address?.pinCode || pincode,
+        landmark: bookingData.address?.landmark,
+        altmobile: '',
+        altemail: '',
+        hard_copy: 0,
+        vendor_booking_id: `VB-${userUuid.substring(0, 8)}-${Date.now()}`,
+        vendor_billing_user_id: `CUST-${userUuid.substring(0, 12)}-0`,
+        payment_option: bookingData.paymentMethod === 'prepaid' || bookingData.paymentMethod === 'online' ? 'prepaid' : 'cod',
+        discounted_price: Math.round(discountedPrice),
+        zone_id: parseInt(zoneId),
+        client_id: '',
+        user_uuid: userUuid,
+        access_token: await getAccessToken(),
+      };
+
+      // Create booking in Healthians
+      const healthiansResult = await createHealthiansBooking(healthiansPayload);
+
+      if (!healthiansResult.success) {
+        toast({
+          variant: 'destructive',
+          title: 'Booking Failed',
+          description: healthiansResult.message || 'Failed to create booking with Healthians',
+        });
+        setIsSubmitting(false);
+        return;
+      }
+
+      // Store Healthians response
+      const healthiansBookingId = healthiansResult.booking_id || healthiansResult.healthians_response?.booking_id;
+      setHealthiansBookingResponse(healthiansResult);
+
+      // If online payment is selected, process payment
       if (bookingData.paymentMethod === 'prepaid' || bookingData.paymentMethod === 'online') {
-        // Process Razorpay payment
-        const finalAmount = appliedCoupon 
-          ? totalPrice - appliedCoupon.discount 
-          : totalPrice;
+        const finalAmount = appliedCoupon ? totalPrice - appliedCoupon.discount : totalPrice;
         const amountInPaise = Math.round(finalAmount * 100);
 
-        const primaryCustomer = bookingData.customers[0];
-        
         await processRazorpayPayment(
           amountInPaise,
           userUuid,
@@ -167,42 +256,36 @@ const Booking = () => {
           },
           async (paymentDetails) => {
             try {
-              // Payment successful - create booking with payment info
-              await createBookingInDatabase(
-                userUuid,
-                bookingId,
-                'completed',
-                paymentDetails
-              );
-
               clearCart();
               
               toast({
-                title: 'Payment Successful!',
-                description: `Your booking ID is ${bookingId}`,
+                title: 'Booking Successful!',
+                description: `Booking ID: ${healthiansBookingId}`,
               });
 
               navigate('/confirmation', { 
                 state: { 
-                  bookingId, 
+                  bookingId: healthiansBookingId, 
                   booking: {
-                    id: bookingId,
+                    id: healthiansBookingId,
                     ...bookingData,
                     packages: items,
                     totalPrice,
+                    discountedPrice,
                     coupon: appliedCoupon,
                     status: 'confirmed',
                     paymentStatus: 'completed',
                     createdAt: new Date().toISOString(),
+                    healthiansResponse: healthiansResult.healthians_response,
                   }
                 } 
               });
             } catch (error) {
-              console.error('Booking creation after payment:', error);
+              console.error('Navigation after payment:', error);
               toast({
                 variant: 'destructive',
-                title: 'Booking Failed',
-                description: 'Payment successful but booking creation failed. Please contact support with payment ID: ' + paymentDetails.paymentId,
+                title: 'Navigation Error',
+                description: 'Booking created but error navigating. Booking ID: ' + healthiansBookingId,
               });
             } finally {
               setIsSubmitting(false);
@@ -213,33 +296,54 @@ const Booking = () => {
             toast({
               variant: 'destructive',
               title: 'Payment Failed',
-              description: error.message || 'Payment was not completed. Please try again.',
+              description: error.message || 'Payment was not completed. Your booking is created but unpaid.',
             });
+            // Still navigate to confirmation with unpaid status
+            setTimeout(() => {
+              navigate('/confirmation', { 
+                state: { 
+                  bookingId: healthiansBookingId, 
+                  booking: {
+                    id: healthiansBookingId,
+                    ...bookingData,
+                    packages: items,
+                    totalPrice,
+                    discountedPrice,
+                    coupon: appliedCoupon,
+                    status: 'confirmed',
+                    paymentStatus: 'pending',
+                    createdAt: new Date().toISOString(),
+                    healthiansResponse: healthiansResult.healthians_response,
+                  }
+                } 
+              });
+            }, 1500);
             setIsSubmitting(false);
           }
         );
       } else {
-        // Cash on delivery - create booking directly
-        await createBookingInDatabase(userUuid, bookingId, 'pending');
-
+        // Cash on delivery - no payment processing needed
         clearCart();
         
         toast({
           title: 'Booking Confirmed!',
-          description: `Your booking ID is ${bookingId}`,
+          description: `Booking ID: ${healthiansBookingId}`,
         });
 
         navigate('/confirmation', { 
           state: { 
-            bookingId, 
+            bookingId: healthiansBookingId, 
             booking: {
-              id: bookingId,
+              id: healthiansBookingId,
               ...bookingData,
               packages: items,
               totalPrice,
+              discountedPrice,
               coupon: appliedCoupon,
               status: 'confirmed',
+              paymentStatus: 'pending',
               createdAt: new Date().toISOString(),
+              healthiansResponse: healthiansResult.healthians_response,
             }
           } 
         });
@@ -317,6 +421,7 @@ const Booking = () => {
                 date={bookingData.date}
                 timeSlot={bookingData.timeSlot}
                 pinCode={bookingData.address?.pinCode || ''}
+                zoneId={bookingData.zone_id}
                 onUpdate={(date, timeSlot) =>
                   setBookingData({ ...bookingData, date, timeSlot })
                 }

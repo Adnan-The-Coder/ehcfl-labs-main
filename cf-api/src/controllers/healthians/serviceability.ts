@@ -198,7 +198,17 @@ export const getServiceability = async (c: Context) => {
     }
 
     // First: check serviceability by location (v2) to get zone_id
-    const slotDate = body.slot_date || getIndiaDate(0);
+    let slotDate = body.slot_date || getIndiaDate(0);
+    
+    // Validate slot_date is not in the past
+    if (slotDate) {
+      const indiaToday = getIndiaDate(0); // Today in IST
+      if (slotDate < indiaToday) {
+        console.warn(`Provided slot_date ${slotDate} is before today ${indiaToday}, using today's date`);
+        slotDate = indiaToday;
+      }
+    }
+    
     const svcPayload = {
       lat: String(geoLocation.latitude),
       long: String(geoLocation.longitude),
@@ -453,7 +463,12 @@ async function safeJson(resp: Response): Promise<any | undefined> {
 function getIndiaDate(offsetDays = 0): string {
   const now = new Date();
   const utcMs = now.getTime() + now.getTimezoneOffset() * 60000;
-  const ist = new Date(utcMs + 330 * 60000);
-  if (offsetDays) ist.setDate(ist.getDate() + offsetDays);
-  return ist.toISOString().split('T')[0];
+  // Shift to IST and then add day offset in milliseconds
+  const istMs = utcMs + (330 * 60000) + (offsetDays * 86400000);
+  const ist = new Date(istMs);
+  // Read components from shifted date to avoid UTC conversion issues
+  const year = ist.getUTCFullYear();
+  const month = String(ist.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(ist.getUTCDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }

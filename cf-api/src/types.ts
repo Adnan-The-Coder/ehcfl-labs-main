@@ -20,4 +20,8 @@ export interface CloudflareBindings {
   HEALTHIANS_PARTNER_NAME?: string;
   HEALTHIANS_USERNAME?: string;
   HEALTHIANS_PASSWORD?: string;
+  HEALTHIANS_CHECKSUM_SECRET?: string;
+
+  // Database binding
+  DB?: any;
 }

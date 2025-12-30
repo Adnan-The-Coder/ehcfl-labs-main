@@ -1,6 +1,8 @@
 export const API_BASE_URL = import.meta.env.VITE_BACKEND_API_BASE_URL || 'http://127.0.0.1:8787';
 
 export const API_ENDPOINTS = {
+    apiBase: API_BASE_URL,
+    
     // User Profile Endpoints 
     createProfile: `${API_BASE_URL}/users`, // Creating a new user profile
     getAllProfiles: `${API_BASE_URL}/users`, // Fetching all userProfiles
@@ -23,4 +25,8 @@ export const API_ENDPOINTS = {
     healthiansAuth: `${API_BASE_URL}/healthians/auth`, // Get Healthians access token
     healthiansPackages: `${API_BASE_URL}/healthians/packages`, // Get packages by zipcode
     healthiansServiceability: `${API_BASE_URL}/healthians/serviceability`, // Check service availability
+    healthiansSlots: `${API_BASE_URL}/healthians/slots`, // Get available slots for a date
+    healthiansBooking: `${API_BASE_URL}/healthians/booking`, // Create Healthians booking
+    healthiansBookingDetail: (bookingId: string) => `${API_BASE_URL}/healthians/booking/${bookingId}`, // Get booking details
+    healthiansBookingCancel: (bookingId: string) => `${API_BASE_URL}/healthians/booking/${bookingId}/cancel`, // Cancel booking
 }
