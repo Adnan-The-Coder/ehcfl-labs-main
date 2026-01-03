@@ -8,44 +8,56 @@ export const getAccessToken = async (c: Context) => {
     const username = c.env.HEALTHIANS_USERNAME as string;
     const password = c.env.HEALTHIANS_PASSWORD as string;
 
-    // Validate credentials
     if (!baseUrl || !partnerName || !username || !password) {
       return c.json(
-        {
-          success: false,
-          error: 'Healthians credentials not configured properly',
-        },
+        { success: false, error: 'Healthians credentials not configured properly' },
         500
       );
     }
 
     const url = `${baseUrl}/api/${partnerName}/getAccessToken`;
 
-    console.log('Requesting Healthians access token...');
-    console.log('URL:', url);
+    const basicAuth = btoa(`${username}:${password}`);
 
     const response = await fetch(url, {
       method: 'GET',
+      redirect: 'follow', 
       headers: {
-        'Accept': 'application/json',
-        'Authorization': 'Basic ' + btoa(`${username}:${password}`),
+        Accept: 'application/json',
+        Authorization: `Basic ${basicAuth}`,
       },
     });
 
+    const contentType = response.headers.get('content-type') || '';
+    const rawText = await response.text();
+
+    // 🔍 Log raw response when debugging
+    console.error('Healthians raw response:', rawText);
+
     if (!response.ok) {
-      const errorData = await response.json();
-      console.error('Healthians auth failed:', errorData);
       return c.json(
         {
           success: false,
           error: 'Failed to get Healthians access token',
-          details: errorData,
+          status: response.status,
+          response: rawText,
         },
         502
       );
     }
 
-    const data: any = await response.json();
+    if (!contentType.includes('application/json')) {
+      return c.json(
+        {
+          success: false,
+          error: 'Healthians returned non-JSON response',
+          response: rawText,
+        },
+        502
+      );
+    }
+
+    const data = JSON.parse(rawText);
 
     if (!data?.access_token) {
       return c.json(
@@ -61,12 +73,12 @@ export const getAccessToken = async (c: Context) => {
     return c.json({
       success: true,
       access_token: data.access_token,
-      refresh_token: data.refresh_token || null,
+      refresh_token: data.refresh_token ?? null,
       token_type: 'Bearer',
-      expires_in: 3600,
+      expires_in: data.expires_in ?? 3600,
     });
   } catch (error: any) {
-    console.error('Healthians auth exception:', error.message);
+    console.error('Healthians auth exception:', error);
     return c.json(
       {
         success: false,
