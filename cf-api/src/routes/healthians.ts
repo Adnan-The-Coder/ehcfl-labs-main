@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import type { CloudflareBindings } from '../types';
 import { getAccessToken } from '../controllers/healthians/auth';
 import { getPartnerProducts } from '../controllers/healthians/packages';
-import { getServiceability } from '../controllers/healthians/serviceability';
+import { checkServiceabilityByLocationV2 } from '../controllers/healthians/serviceability';
 import { getSlots } from '../controllers/healthians/slots';
 import { 
   createHealthiansBooking,
@@ -37,7 +37,8 @@ healthiansRoutes.post('/packages', getPartnerProducts);
  * Uses dual-geolocation: coordinates > zipcode > IP geolocation > fallback
  * Returns: { success, serviceable, message, location, slots_available, sample_slot, all_slots }
  */
-healthiansRoutes.post('/serviceability', getServiceability);
+// healthiansRoutes.post('/serviceability/v2',);
+healthiansRoutes.post('/serviceability', checkServiceabilityByLocationV2);
 
 /**
  * POST /healthians/slots

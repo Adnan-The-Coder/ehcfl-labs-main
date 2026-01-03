@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 export interface CloudflareBindings {
   // Environment config
   ENVIRONMENT?: string;
@@ -24,4 +25,14 @@ export interface CloudflareBindings {
 
   // Database binding
   DB?: any;
+}
+
+export interface GeoLocation {
+  latitude: number;
+  longitude: number;
+  address?: string;
+  postal?: string | null;
+  city?: string | null;
+  region?: string | null;
+  country_name?: string | null;
 }

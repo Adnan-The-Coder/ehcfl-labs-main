@@ -44,7 +44,12 @@ export interface BookingData {
   timeSlot: string;
   paymentMethod: string;
   zone_id?: string;
+  latitude?: string;
+  longitude?: string;
+  zipcode?: string;
 }
+
+const LOCATION_CACHE_KEY = 'ehcf_booking_location';
 
 const steps = [
   { id: 1, name: 'Customer Details' },
@@ -79,44 +84,100 @@ const Booking = () => {
 
   const handleNext = async () => {
     if (currentStep < 4) {
-      // If moving from Address (step 2) to Date & Time (step 3), verify pincode and get zone_id
+      // Step 2 → 3: Verify address and save location data
       if (currentStep === 2 && bookingData.address?.pinCode) {
-        try {
-          setIsSubmitting(true);
-          console.log('🔍 Verifying pincode:', bookingData.address.pinCode);
-          
-          const serviceabilityResult = await checkServiceability(
-            bookingData.address?.pinCode || ''
-          );
+        const pinCode = bookingData.address.pinCode.trim();
+        
+        if (!pinCode) {
+          toast({
+            variant: 'destructive',
+            title: 'Invalid Pincode',
+            description: 'Please enter a valid pincode',
+          });
+          return;
+        }
 
-          if (!serviceabilityResult.isServiceable) {
+        setIsSubmitting(true);
+        
+        try {
+          // 1. Check serviceability
+          console.log('1️⃣ Checking serviceability for:', pinCode);
+          const result = await checkServiceability(pinCode);
+          
+          if (!result.isServiceable) {
             toast({
               variant: 'destructive',
               title: 'Location Not Serviceable',
-              description: serviceabilityResult.message || 'This location is not serviceable for booking',
+              description: result.message || 'This area is not serviceable',
             });
             setIsSubmitting(false);
             return;
           }
 
-          // Store zone_id for later use in slots endpoint
-          const zoneId = serviceabilityResult.zoneId;
-          setBookingData({ ...bookingData, zone_id: zoneId });
-          console.log('✅ Zone ID obtained:', zoneId);
+          // 2. Extract location data
+          const { zoneId, location } = result;
+          if (!zoneId || !location?.latitude || !location?.longitude) {
+            console.error('❌ Invalid response:', { zoneId, location });
+            toast({
+              variant: 'destructive',
+              title: 'Error',
+              description: 'Could not retrieve location information',
+            });
+            setIsSubmitting(false);
+            return;
+          }
+
+          // 3. Save to localStorage FIRST (before state update)
+          const locationData = {
+            zone_id: String(zoneId),
+            latitude: String(location.latitude),
+            longitude: String(location.longitude),
+            zipcode: pinCode,
+          };
+
+          console.log('2️⃣ Saving to localStorage:', locationData);
+          localStorage.setItem(LOCATION_CACHE_KEY, JSON.stringify(locationData));
           
-          setCurrentStep(currentStep + 1);
+          // Verify save
+          const saved = localStorage.getItem(LOCATION_CACHE_KEY);
+          if (!saved) {
+            toast({
+              variant: 'destructive',
+              title: 'Storage Error',
+              description: 'Could not save location. Please enable localStorage.',
+            });
+            setIsSubmitting(false);
+            return;
+          }
+          console.log('✅ Verified in localStorage:', saved);
+
+          // 4. Update React state (this can be slow/async)
+          console.log('3️⃣ Updating React state...');
+          setBookingData(prev => ({
+            ...prev,
+            zone_id: String(zoneId),
+            latitude: String(location.latitude),
+            longitude: String(location.longitude),
+            zipcode: pinCode,
+          }));
+
+          // 5. Navigate (DateTimeStep will read from localStorage)
+          console.log('4️⃣ Navigating to DateTimeStep...');
+          setCurrentStep(3);
           window.scrollTo({ top: 0, behavior: 'smooth' });
           setIsSubmitting(false);
+
         } catch (error) {
-          console.error('❌ Serviceability check failed:', error);
+          console.error('❌ Error:', error);
           toast({
             variant: 'destructive',
             title: 'Verification Failed',
-            description: error instanceof Error ? error.message : 'Could not verify location',
+            description: error instanceof Error ? error.message : 'Unknown error',
           });
           setIsSubmitting(false);
         }
       } else {
+        // Other steps: simple navigation
         setCurrentStep(currentStep + 1);
         window.scrollTo({ top: 0, behavior: 'smooth' });
       }
@@ -257,6 +318,7 @@ const Booking = () => {
           async (paymentDetails) => {
             try {
               clearCart();
+              localStorage.removeItem(LOCATION_CACHE_KEY);
               
               toast({
                 title: 'Booking Successful!',
@@ -324,6 +386,7 @@ const Booking = () => {
       } else {
         // Cash on delivery - no payment processing needed
         clearCart();
+        localStorage.removeItem(LOCATION_CACHE_KEY);
         
         toast({
           title: 'Booking Confirmed!',
@@ -422,6 +485,9 @@ const Booking = () => {
                 timeSlot={bookingData.timeSlot}
                 pinCode={bookingData.address?.pinCode || ''}
                 zoneId={bookingData.zone_id}
+                latitude={bookingData.latitude}
+                longitude={bookingData.longitude}
+                zipcode={bookingData.zipcode}
                 onUpdate={(date, timeSlot) =>
                   setBookingData({ ...bookingData, date, timeSlot })
                 }

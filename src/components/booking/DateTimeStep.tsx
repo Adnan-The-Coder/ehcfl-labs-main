@@ -5,13 +5,16 @@ import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { getMinSelectableDate } from '@/utils/dateUtils';
 import { Clock, AlertCircle, Loader2 } from 'lucide-react';
-import { API_ENDPOINTS } from '@/config/api';
+import { getTimeSlots } from '@/services/healthiansApi';
 
 interface Props {
   date: string;
   timeSlot: string;
   pinCode: string;
   zoneId?: string;
+  latitude?: string;
+  longitude?: string;
+  zipcode?: string;
   onUpdate: (date: string, timeSlot: string) => void;
   onNext: () => void;
   onBack: () => void;
@@ -25,7 +28,43 @@ interface AvailableSlot {
   is_peak_hours: string;
 }
 
-const DateTimeStep = ({ date, timeSlot, onUpdate, onNext, onBack, pinCode, zoneId }: Props) => {
+// Helper to safely retrieve location data synchronously
+const getLocationFromCache = () => {
+  try {
+    const cached = localStorage.getItem('ehcf_booking_location');
+    if (!cached) {
+      console.log('❌ No cache in localStorage');
+      return null;
+    }
+    
+    const data = JSON.parse(cached);
+    console.log('✅ Found cache:', data);
+    
+    // Return normalized structure
+    return {
+      zoneId: String(data.zone_id || ''),
+      latitude: String(data.latitude || ''),
+      longitude: String(data.longitude || ''),
+      zipcode: String(data.zipcode || ''),
+    };
+  } catch (error) {
+    console.error('❌ Cache read error:', error);
+    return null;
+  }
+};
+
+const DateTimeStep = ({ 
+  date, 
+  timeSlot, 
+  onUpdate, 
+  onNext, 
+  onBack, 
+  pinCode, 
+  zoneId: propZoneId,
+  latitude: propLatitude,
+  longitude: propLongitude,
+  zipcode: propZipcode,
+}: Props) => {
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(
     date ? new Date(date) : undefined
   );
@@ -35,12 +74,46 @@ const DateTimeStep = ({ date, timeSlot, onUpdate, onNext, onBack, pinCode, zoneI
   const [availableSlots, setAvailableSlots] = useState<AvailableSlot[]>([]);
   const [slotError, setSlotError] = useState('');
 
+  // ALWAYS read from localStorage (ignore props to avoid state sync issues)
+  const getLocationData = () => {
+    console.log('🔍 Reading from localStorage...');
+    const cached = getLocationFromCache();
+    
+    if (!cached || !cached.zoneId || !cached.latitude || !cached.longitude || !cached.zipcode) {
+      console.error('❌ No valid location in localStorage');
+      return null;
+    }
+
+    console.log('✅ Location loaded from localStorage:', cached);
+    return cached;
+  };
+
   const today = getMinSelectableDate();
   const maxDate = new Date(today.getTime() + 7 * 86400000);
 
+  // Fetch slots when date changes (location is read fresh inside effect)
   useEffect(() => {
     const fetchSlots = async () => {
       if (!selectedDate) {
+        setAvailableSlots([]);
+        setSlotError('');
+        return;
+      }
+
+      // Read location data INSIDE the effect to avoid dependency issues
+      const locationData = getLocationData();
+      
+      if (!locationData) {
+        console.error('❌ No location data');
+        setSlotError('Location data not available. Please go back and verify your address.');
+        setAvailableSlots([]);
+        return;
+      }
+
+      const { zoneId, latitude, longitude, zipcode } = locationData;
+      if (!zoneId || !latitude || !longitude || !zipcode) {
+        console.error('❌ Incomplete location:', { zoneId, latitude, longitude, zipcode });
+        setSlotError('Incomplete location information. Please verify your address.');
         setAvailableSlots([]);
         return;
       }
@@ -55,60 +128,47 @@ const DateTimeStep = ({ date, timeSlot, onUpdate, onNext, onBack, pinCode, zoneI
         const day = String(selectedDate.getDate()).padStart(2, '0');
         const dateString = `${year}-${month}-${day}`;
 
-        console.log('📅 Fetching slots for date:', dateString, 'Pincode:', pinCode);
-
-        // Fetch access token first
-        let accessToken = '';
-        try {
-          const authResp = await fetch(`${API_ENDPOINTS.apiBase}/healthians/auth`);
-          if (authResp.ok) {
-            const authData = await authResp.json();
-            accessToken = authData.access_token;
-            console.log('✅ Got access token from auth endpoint');
-          }
-        } catch (err) {
-          console.warn('⚠️ Could not fetch access token:', err);
-        }
-
-        const response = await fetch(API_ENDPOINTS.healthiansSlots, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            ...(accessToken && { 'X-Access-Token': accessToken }),
-          },
-          body: JSON.stringify({ 
-            slot_date: dateString, 
-            zipcode: pinCode,
-            ...(zoneId && { zone_id: zoneId }),
-          }),
+        console.log('📅 Fetching slots with location data:', {
+          date: dateString,
+          zoneId,
+          latitude,
+          longitude,
+          zipcode,
         });
 
-        if (!response.ok) {
-          const errorData = await response.json();
-          throw new Error(errorData.message || 'Failed to fetch slots');
+        const result = await getTimeSlots(
+          dateString,
+          zoneId,
+          latitude,
+          longitude,
+          zipcode,
+          0, // get_ppmc_slots
+          0  // has_female_patient
+        );
+
+        if (!result.success) {
+          throw new Error(result.message || 'Failed to fetch slots');
         }
 
-        const data = await response.json();
-        console.log('✅ Slots fetched:', data.slots?.length || 0);
+        console.log('✅ Slots fetched:', result.slots?.length || 0);
 
-        if (data.slots && Array.isArray(data.slots)) {
-          setAvailableSlots(data.slots);
-          if (data.slots.length === 0) {
-            setSlotError('No slots available for selected date');
-          }
+        if (result.slots && Array.isArray(result.slots) && result.slots.length > 0) {
+          setAvailableSlots(result.slots);
         } else {
           setSlotError('No slots available for selected date');
+          setAvailableSlots([]);
         }
       } catch (err) {
         console.error('❌ Error fetching slots:', err);
         setSlotError(err instanceof Error ? err.message : 'Failed to load slots');
+        setAvailableSlots([]);
       } finally {
         setLoadingSlots(false);
       }
     };
 
     fetchSlots();
-  }, [selectedDate, pinCode, zoneId]);
+  }, [selectedDate]); // ONLY depend on selectedDate, not locationData object
 
   const handleDateSelect = (date: Date | undefined) => {
     setSelectedDate(date);

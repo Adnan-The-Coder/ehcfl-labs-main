@@ -113,39 +113,82 @@ export async function getPackages(pincode?: string, search?: string) {
 
 /**
  * Check Healthians service availability for a location
- * Uses geolocation (coordinates > zipcode > IP)
- * Calls cf-api /healthians/serviceability endpoint
+ * Uses checkServiceabilityByLocation_v2 logic
+ * Fetches lat/long from zipcode via geolocation helpers
+ * Calls cf-api /healthians/serviceability/v2 endpoint
+ * 
+ * curl reference:
+ * curl -X POST "https://t25crm.healthians.co.in/api/[partner]/checkServiceabilityByLocation_v2" \
+ *   --header "Authorization: Bearer $TOKEN" \
+ *   --header "Content-Type: application/json" \
+ *   --data '{ "lat": "17.3943916", "long": "78.4945016", "zipcode": "500027", "is_ppmc_booking": 0 }'
  */
-export async function checkServiceability(
-  pincode?: string,
-  latitude?: number,
-  longitude?: number,
-  slotDate?: string
-) {
+export async function checkServiceability(pincode: string, isPpmcBooking: number = 0) {
   try {
+    const cleanPincode = (pincode || '').trim();
+    
+    if (!cleanPincode || cleanPincode.length === 0) {
+      throw new Error('Valid pincode is required');
+    }
+
+    if (!/^\d{6}$/.test(cleanPincode)) {
+      throw new Error('Pincode must be exactly 6 digits');
+    }
+
     console.log('🔍 Checking Healthians serviceability:', {
-      pincode,
-      hasCoordinates: !!(latitude && longitude),
-      slotDate,
+      pincode: cleanPincode,
+      isPpmcBooking,
     });
 
-    const accessToken = await getAccessToken();
+    // Fetch geolocation from zipcode
+    console.log('🌍 Fetching coordinates for zipcode:', cleanPincode);
+    const geoResponse = await fetch(
+      `https://nominatim.openstreetmap.org/search?postalcode=${cleanPincode}&country=IN&format=json&limit=1`,
+      {
+        headers: {
+          'User-Agent': 'EHCFLabs/1.0',
+        },
+      }
+    );
 
-    const payload: any = {
-      accessToken,
-      slot_date: slotDate,
-      amount: 0,
-      isDeviceSlot: false,
+    if (!geoResponse.ok) {
+      throw new Error(`Geolocation service error: ${geoResponse.status}`);
+    }
+
+    const geoData = await geoResponse.json() as Array<{ lat: string; lon: string }>;
+    if (!Array.isArray(geoData) || geoData.length === 0 || !geoData[0].lat || !geoData[0].lon) {
+      throw new Error('Pincode not found in geolocation database. Please verify the pincode.');
+    }
+
+    const latitude = String(parseFloat(geoData[0].lat));
+    const longitude = String(parseFloat(geoData[0].lon));
+    
+    if (!latitude || !longitude || latitude === 'NaN' || longitude === 'NaN') {
+      throw new Error('Invalid coordinates retrieved from geolocation service');
+    }
+
+    console.log('✅ Geolocation resolved:', { latitude, longitude, pincode: cleanPincode });
+
+    // Get access token
+    let accessToken: string;
+    try {
+      accessToken = await getAccessToken();
+      if (!accessToken) {
+        throw new Error('Failed to obtain access token');
+      }
+    } catch (tokenError) {
+      console.error('❌ Access token error:', tokenError);
+      throw new Error('Authentication failed. Please try again.');
+    }
+
+    const payload = {
+      lat: latitude,
+      long: longitude,
+      zipcode: cleanPincode,
+      is_ppmc_booking: isPpmcBooking,
     };
 
-    // Add location info
-    if (latitude && longitude) {
-      // Prefer lat/long keys; backend also supports latitude/longitude
-      payload.lat = String(latitude);
-      payload.long = String(longitude);
-    } else if (pincode) {
-      payload.zipcode = pincode;
-    }
+    console.log('📤 Sending serviceability request to:', API_ENDPOINTS.healthiansServiceability);
 
     const response = await fetch(API_ENDPOINTS.healthiansServiceability, {
       method: 'POST',
@@ -157,69 +200,203 @@ export async function checkServiceability(
       body: JSON.stringify(payload),
     });
 
+    const data = await response.json();
+
     if (!response.ok) {
-      const errorData = await response.json();
-      console.error('❌ Serviceability check failed:', errorData);
-      throw new Error(errorData.error || 'Failed to check serviceability');
+      console.error('❌ Serviceability API error:', {
+        status: response.status,
+        statusText: response.statusText,
+        data,
+      });
+      throw new Error(data.message || data.error || `Service error: ${response.status}`);
     }
 
-    const data = await response.json();
-    console.log('✅ Serviceability response received:', {
-      success: data.success,
-      serviceable: data.serviceable,
-      location: data.location,
-      slotsAvailable: data.slots_available,
+    // Validate response structure
+    if (!data.data || typeof data.data !== 'object') {
+      console.error('❌ Invalid response structure from Healthians:', data);
+      throw new Error('Invalid response from Healthians API');
+    }
+
+    const zoneId = data.data.zone_id;
+    const isServiceable = data.status === true && !!zoneId;
+
+    console.log('✅ Serviceability verified:', {
+      isServiceable,
+      zoneId,
+      status: data.status,
+      resCode: data.resCode,
     });
 
-    // Be tolerant if backend omits success: infer from status/serviceable
-    const success = data.success !== undefined ? data.success : (data.status === true || data.serviceable === true);
-    if (!success) {
-      throw new Error(data.error || data.message || 'Serviceability check failed');
-    }
-
     return {
-      isServiceable: data.serviceable === true,
-      message: data.message || 'Serviceability check complete',
-      location: data.location,
-      slotsAvailable: data.slots_available || 0,
-      sampleSlot: data.sample_slot,
-      allSlots: data.all_slots || [],
-      zoneId: data.zone_id,
+      success: true,
+      isServiceable,
+      status: data.status || false,
+      zoneId: zoneId || null,
+      message: data.message || (isServiceable ? 'Location is serviceable' : 'Location is not serviceable'),
+      resCode: data.resCode,
+      location: {
+        zipcode: cleanPincode,
+        latitude,
+        longitude,
+      },
+      rawResponse: data,
     };
   } catch (error) {
-    console.error('❌ Error checking serviceability:', error);
+    const errorMessage = error instanceof Error ? error.message : 'Failed to check serviceability';
+    console.error('❌ Serviceability check error:', {
+      error: errorMessage,
+      pincode,
+      stack: error instanceof Error ? error.stack : undefined,
+    });
+    
     return {
+      success: false,
       isServiceable: false,
-      message: 'Failed to check serviceability',
-      location: null,
-      slotsAvailable: 0,
-      sampleSlot: null,
-      allSlots: [],
+      status: false,
+      zoneId: null,
+      message: errorMessage,
+      location: {
+        zipcode: null,
+        latitude: null,
+        longitude: null,
+      },
+      rawResponse: null,
     };
   }
 }
 
 /**
  * Get available time slots for booking
- * TODO: Implement when Healthians timeslots endpoint is available in cf-api
+ * Calls cf-api /healthians/slots endpoint
+ * Requires zone_id, lat, long, zipcode from serviceability check
+ * 
+ * curl reference:
+ * curl -X POST 'https://t25crm.healthians.co.in/api/[partner]/getSlotsByLocation' \
+ *   --header "Authorization: Bearer $TOKEN" \
+ *   --data '{ "slot_date": "2026-01-04", "zone_id": "122", "lat": "17.3943916", "long": "78.4945016", "zipcode": "500027", "get_ppmc_slots": 0, "has_female_patient": 0 }'
  */
-export async function getTimeSlots(pincode: string, bookingDate: string) {
+export async function getTimeSlots(
+  slotDate: string,
+  zoneId: string,
+  lat: string,
+  long: string,
+  zipcode: string,
+  getPpmcSlots: number = 0,
+  hasFemalePatient: number = 0
+) {
   try {
-    console.log('⏰ Fetching time slots:', { pincode, bookingDate });
-    
-    // Temporary mock implementation
-    // Will be replaced with actual cf-api call when endpoint is available
-    console.log('⚠️ Time slots endpoint not yet migrated to cf-api');
-    
-    return [
-      { time: '9:00 AM', available: true },
-      { time: '10:00 AM', available: true },
-      { time: '2:00 PM', available: true },
-      { time: '3:00 PM', available: true },
-    ];
+    // Validate and normalize inputs
+    const cleanDate = (slotDate || '').trim();
+    const cleanZoneId = String(zoneId || '').trim();
+    const cleanLat = String(lat || '').trim();
+    const cleanLong = String(long || '').trim();
+    const cleanZipcode = (zipcode || '').trim();
+
+    // Validate date format (YYYY-MM-DD)
+    if (!cleanDate || !/^\d{4}-\d{2}-\d{2}$/.test(cleanDate)) {
+      throw new Error('Invalid date format. Expected YYYY-MM-DD');
+    }
+
+    // Validate all required parameters
+    const missingParams: string[] = [];
+    if (!cleanZoneId) missingParams.push('zoneId');
+    if (!cleanLat || cleanLat === 'NaN') missingParams.push('latitude');
+    if (!cleanLong || cleanLong === 'NaN') missingParams.push('longitude');
+    if (!cleanZipcode) missingParams.push('zipcode');
+
+    if (missingParams.length > 0) {
+      throw new Error(`Missing required parameters: ${missingParams.join(', ')}`);
+    }
+
+    console.log('⏰ Fetching time slots:', {
+      slotDate: cleanDate,
+      zoneId: cleanZoneId,
+      zipcode: cleanZipcode,
+      coordinates: { lat: cleanLat, long: cleanLong },
+    });
+
+    // Get access token
+    let accessToken: string;
+    try {
+      accessToken = await getAccessToken();
+      if (!accessToken) {
+        throw new Error('Failed to obtain access token');
+      }
+    } catch (tokenError) {
+      console.error('❌ Access token error:', tokenError);
+      throw new Error('Authentication failed. Please try again.');
+    }
+
+    const payload = {
+      slot_date: cleanDate,
+      zone_id: cleanZoneId,
+      lat: cleanLat,
+      long: cleanLong,
+      zipcode: cleanZipcode,
+      get_ppmc_slots: getPpmcSlots,
+      has_female_patient: hasFemalePatient,
+    };
+
+    console.log('📤 Sending slots request to:', API_ENDPOINTS.healthiansSlots);
+
+    const response = await fetch(API_ENDPOINTS.healthiansSlots, {
+      method: 'POST',
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      console.error('❌ Slots API error:', {
+        status: response.status,
+        statusText: response.statusText,
+        data,
+      });
+      throw new Error(data.message || data.error || `Service error: ${response.status}`);
+    }
+
+    // Validate response structure
+    if (!('data' in data)) {
+      console.error('❌ Invalid slots response structure:', data);
+      throw new Error('Invalid response from Healthians API');
+    }
+
+    const slots = Array.isArray(data.data) ? data.data : [];
+    console.log('✅ Slots retrieved:', {
+      count: slots.length,
+      date: cleanDate,
+      zoneId: cleanZoneId,
+      resCode: data.resCode,
+    });
+
+    return {
+      success: true,
+      status: data.status || false,
+      message: data.message || 'Slots retrieved',
+      slots,
+      resCode: data.resCode,
+      rawResponse: data,
+    };
   } catch (error) {
-    console.error('❌ Error fetching time slots:', error);
-    return [];
+    const errorMessage = error instanceof Error ? error.message : 'Failed to fetch slots';
+    console.error('❌ Slots fetch error:', {
+      error: errorMessage,
+      parameters: { slotDate, zoneId, zipcode },
+      stack: error instanceof Error ? error.stack : undefined,
+    });
+    
+    return {
+      success: false,
+      status: false,
+      message: errorMessage,
+      slots: [],
+      rawResponse: null,
+    };
   }
 }
 
@@ -227,12 +404,16 @@ export async function getTimeSlots(pincode: string, bookingDate: string) {
  * Create a booking with Healthians createBooking_v3 API
  * Sends booking data to cf-api which calls Healthians and stores in DB
  */
-export async function createHealthiansBooking(bookingData: any) {
+export async function createHealthiansBooking(bookingData: Record<string, unknown>) {
   try {
+    const vendorBookingId = bookingData.vendor_booking_id as unknown;
+    const customers = bookingData.customer as unknown;
+    const packages = bookingData.package as unknown;
+    
     console.log('📝 Creating Healthians booking via cf-api:', {
-      vendor_booking_id: bookingData.vendor_booking_id,
-      customers: bookingData.customer?.length,
-      packages: bookingData.package?.length,
+      vendor_booking_id: vendorBookingId,
+      customers: Array.isArray(customers) ? customers.length : 0,
+      packages: Array.isArray(packages) ? packages.length : 0,
     });
 
     if (!bookingData.vendor_booking_id || !bookingData.customer || !bookingData.package) {
@@ -369,7 +550,7 @@ export async function cancelHealthiansBooking(bookingId: string) {
  * Subscribe to real-time booking updates
  * TODO: Implement with WebSocket when backend support is ready
  */
-export function subscribeToBookingUpdates(bookingId: string, callback: (status: any) => void) {
+export function subscribeToBookingUpdates(bookingId: string, callback: (status: Record<string, unknown>) => void) {
   console.log('📡 Real-time booking updates not yet implemented');
   
   const unsubscribe = () => {
