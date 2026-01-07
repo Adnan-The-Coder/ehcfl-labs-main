@@ -95,25 +95,45 @@ const DateTimeStep = ({
   useEffect(() => {
     const fetchSlots = async () => {
       if (!selectedDate) {
+        console.log('📅 No date selected');
         setAvailableSlots([]);
         setSlotError('');
         return;
       }
 
-      // Read location data INSIDE the effect to avoid dependency issues
+      // Read location data INSIDE the effect to ensure fresh data
+      console.log('📍 Reading location from localStorage...');
       const locationData = getLocationData();
       
       if (!locationData) {
-        console.error('❌ No location data');
-        setSlotError('Location data not available. Please go back and verify your address.');
+        const errorMsg = 'Location data not available. Please go back and verify your address.';
+        console.error('❌', errorMsg);
+        setSlotError(errorMsg);
         setAvailableSlots([]);
         return;
       }
 
       const { zoneId, latitude, longitude, zipcode } = locationData;
-      if (!zoneId || !latitude || !longitude || !zipcode) {
-        console.error('❌ Incomplete location:', { zoneId, latitude, longitude, zipcode });
-        setSlotError('Incomplete location information. Please verify your address.');
+      
+      // Validate each field
+      if (!zoneId) {
+        const errorMsg = 'Zone ID missing. Please verify your address.';
+        console.error('❌', errorMsg, { zoneId, latitude, longitude, zipcode });
+        setSlotError(errorMsg);
+        setAvailableSlots([]);
+        return;
+      }
+      if (!latitude || !longitude) {
+        const errorMsg = 'Latitude/Longitude missing. Please verify your address.';
+        console.error('❌', errorMsg, { zoneId, latitude, longitude, zipcode });
+        setSlotError(errorMsg);
+        setAvailableSlots([]);
+        return;
+      }
+      if (!zipcode) {
+        const errorMsg = 'Zipcode missing. Please verify your address.';
+        console.error('❌', errorMsg, { zoneId, latitude, longitude, zipcode });
+        setSlotError(errorMsg);
         setAvailableSlots([]);
         return;
       }
@@ -128,7 +148,7 @@ const DateTimeStep = ({
         const day = String(selectedDate.getDate()).padStart(2, '0');
         const dateString = `${year}-${month}-${day}`;
 
-        console.log('📅 Fetching slots with location data:', {
+        console.log('📅 Fetching slots with:', {
           date: dateString,
           zoneId,
           latitude,
@@ -147,7 +167,9 @@ const DateTimeStep = ({
         );
 
         if (!result.success) {
-          throw new Error(result.message || 'Failed to fetch slots');
+          const errorMsg = result.message || 'Failed to fetch slots';
+          console.error('❌ Slots API error:', errorMsg);
+          throw new Error(errorMsg);
         }
 
         console.log('✅ Slots fetched:', result.slots?.length || 0);

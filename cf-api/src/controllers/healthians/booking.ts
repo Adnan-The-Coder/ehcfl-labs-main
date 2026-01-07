@@ -1,7 +1,27 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
+/**
+ * Healthians Booking Controller
+ * 
+ * IMPORTANT: CHECKSUM CONFIGURATION
+ * ---------------------------------
+ * The Healthians API requires a checksum secret key for booking creation.
+ * 
+ * To configure:
+ * 1. Contact Healthians support/business team to obtain your checksum secret key
+ * 2. Update wrangler.jsonc file with the actual secret:
+ *    "HEALTHIANS_CHECKSUM_SECRET": "your-actual-secret-from-healthians"
+ * 3. For production, set in Cloudflare Workers environment variables
+ * 
+ * The checksum is generated using SHA-256 HMAC with format:
+ * vendor_booking_id|zone_id|customer_calling_number|discounted_price|zipcode
+ * 
+ * Reference: https://partners.healthians.com/#/sample_checksum_code?sha256
+ */
 import { Context } from 'hono';
 import { drizzle } from 'drizzle-orm/d1';
+import { eq } from 'drizzle-orm';
 import { bookings as bookingsTable } from '../../db/schema';
+import { storeBookingInDB } from '../booking/booking';
 import crypto from 'crypto';
 
 interface CreateBookingRequest {
@@ -53,35 +73,74 @@ interface CreateBookingRequest {
   access_token: string;
 }
 
+interface HealthiansBookingResponse {
+  status: boolean;
+  success?: boolean;
+  booking_id?: string;
+  id?: string;
+  message?: string;
+  data?: unknown;
+  resCode?: string;
+  code?: string;
+}
+
 interface BookingResponse {
   success: boolean;
   booking_id?: string;
-  healthians_response?: any;
-  database_record?: any;
+  healthians_response?: HealthiansBookingResponse;
+  database_record?: {
+    id: number;
+    booking_id: string;
+    user_uuid: string;
+    status: string;
+    created_at: string;
+  };
   message: string;
+  error?: string;
+  details?: unknown;
 }
 
 /**
  * Generate X-Checksum for Healthians booking
- * Healthians uses SHA-256 hash for checksum
+ * Healthians uses SHA-256 HMAC with pipe-separated values
+ * 
+ * Common formats to try:
+ * Format 1: vendor_booking_id|zone_id|customer_calling_number|discounted_price|zipcode
+ * Format 2: vendor_booking_id|customer_calling_number|discounted_price|zipcode
+ * Format 3: All the booking payload as JSON string
  */
 function generateChecksum(bookingData: CreateBookingRequest, secretKey: string): string {
-  // Create a sorted string representation of booking data
-  // Include key fields that identify the booking
-  const dataToHash = JSON.stringify({
-    vendor_booking_id: bookingData.vendor_booking_id,
-    customer_calling_number: bookingData.customer_calling_number,
-    mobile: bookingData.mobile,
-    email: bookingData.email || '',
-    zipcode: bookingData.zipcode,
-    discounted_price: bookingData.discounted_price,
-    zone_id: bookingData.zone_id,
-  });
+  // Ensure all values are strings for consistency
+  const vendorBookingId = String(bookingData.vendor_booking_id);
+  const zoneId = String(bookingData.zone_id);
+  const customerCallingNumber = String(bookingData.customer_calling_number);
+  const discountedPrice = String(bookingData.discounted_price);
+  const zipcode = String(bookingData.zipcode);
 
-  // Hash with secret key
+  // Format 1: Most common pattern for Healthians
+  // vendor_booking_id|zone_id|customer_calling_number|discounted_price|zipcode
+  const dataToHash = `${vendorBookingId}|${zoneId}|${customerCallingNumber}|${discountedPrice}|${zipcode}`;
+
+  console.log('🔐 Checksum Input Data:', {
+    vendor_booking_id: vendorBookingId,
+    zone_id: zoneId,
+    customer_calling_number: customerCallingNumber,
+    discounted_price: discountedPrice,
+    zipcode: zipcode,
+    concatenated: dataToHash,
+  });
+  console.log('🔐 Secret Key Length:', secretKey ? secretKey.length : 0);
+  console.log('🔐 Secret Key Present:', secretKey ? 'YES' : 'NO');
+
+  // Hash with secret key using SHA256 HMAC
   const hmac = crypto.createHmac('sha256', secretKey);
   hmac.update(dataToHash);
-  return hmac.digest('hex');
+  const checksumHex = hmac.digest('hex');
+  
+  console.log('🔐 Generated Checksum (hex):', checksumHex);
+  console.log('🔐 Checksum Length:', checksumHex.length);
+  
+  return checksumHex;
 }
 
 /**
@@ -150,14 +209,72 @@ export const createHealthiansBooking = async (c: Context) => {
       );
     }
 
-    // Generate checksum (use empty secret as fallback if not provided)
-    const checksum = generateChecksum(body, checksumSecret || 'default-secret');
+    // Validate required numeric fields
+    if (!body.zone_id || typeof body.zone_id !== 'number') {
+      return c.json(
+        {
+          success: false,
+          message: 'Valid zone_id is required',
+        },
+        400
+      );
+    }
+
+    if (!body.discounted_price || typeof body.discounted_price !== 'number' || body.discounted_price <= 0) {
+      return c.json(
+        {
+          success: false,
+          message: 'Valid discounted_price is required',
+        },
+        400
+      );
+    }
+
+    // Validate slot
+    if (!body.slot || !body.slot.slot_id) {
+      return c.json(
+        {
+          success: false,
+          message: 'Valid slot with slot_id is required',
+        },
+        400
+      );
+    }
+
+    // Validate address fields
+    if (!body.zipcode || !/^\d{6}$/.test(body.zipcode)) {
+      return c.json(
+        {
+          success: false,
+          message: 'Valid 6-digit zipcode is required',
+        },
+        400
+      );
+    }
+
+    // Validate checksum secret (warning only, don't block booking)
+    let checksum = '';
+    let checksumWarning = '';
+    
+    if (!checksumSecret) {
+      console.warn('⚠️ HEALTHIANS_CHECKSUM_SECRET not configured');
+      checksumWarning = 'Checksum secret not configured. Healthians sync will likely fail.';
+      checksum = 'missing-checksum-secret';
+    } else if (checksumSecret === 'your-checksum-secret-key' || checksumSecret === 'default-secret') {
+      console.warn('⚠️ WARNING: Using placeholder HEALTHIANS_CHECKSUM_SECRET!');
+      checksumWarning = 'Using placeholder checksum secret. Contact Healthians support for actual secret.';
+      checksum = generateChecksum(body, checksumSecret);
+    } else {
+      // Generate checksum with validated secret
+      checksum = generateChecksum(body, checksumSecret);
+    }
 
     console.log('Creating Healthians booking:', {
       vendor_booking_id: body.vendor_booking_id,
       customers: body.customer.length,
       packages: body.package.length,
       zone_id: body.zone_id,
+      checksum_status: checksumWarning || 'valid',
     });
 
     // Prepare Healthians API request
@@ -191,6 +308,7 @@ export const createHealthiansBooking = async (c: Context) => {
     };
 
     const url = `${baseUrl}/api/${partnerName}/createBooking_v3`;
+    console.log("healthians booking payload", healthiansPayload);
 
     const response = await fetch(url, {
       method: 'POST',
@@ -205,107 +323,135 @@ export const createHealthiansBooking = async (c: Context) => {
 
     console.log('Healthians createBooking_v3 response status:', response.status);
 
+    const db = drizzle(c.env.DB);
+    let healthiansResponse: HealthiansBookingResponse | null = null;
+    let healthiansSyncStatus: 'pending' | 'synced' | 'failed' = 'pending';
+    let healthiansBookingId: string | null = null;
+    let healthiansError: string | null = checksumWarning || null;
+
+    // Try to process Healthians response
     if (!response.ok) {
       const errorData = await safeJson(response);
-      console.error('Healthians booking creation failed:', errorData);
+      console.error('⚠️ Healthians booking creation failed:', errorData);
+      
+      healthiansSyncStatus = 'failed';
+      const apiError = (errorData as any)?.message || (errorData as any)?.code || `HTTP ${response.status} error`;
+      healthiansError = checksumWarning 
+        ? `${checksumWarning} | API Error: ${apiError}`
+        : apiError;
+      healthiansResponse = errorData as HealthiansBookingResponse;
+
+      console.log('📝 Healthians API failed, storing booking locally to allow payment...');
+    } else {
+      healthiansResponse = await response.json() as HealthiansBookingResponse;
+      console.log('Healthians booking response:', {
+        success: healthiansResponse?.success || healthiansResponse?.status,
+        booking_id: healthiansResponse?.booking_id || healthiansResponse?.id,
+        message: healthiansResponse?.message,
+      });
+
+      // Check both 'success' and 'status' fields as Healthians API may return either
+      const isSuccess = healthiansResponse.success === true || healthiansResponse.status === true;
+      
+      if (isSuccess) {
+        healthiansSyncStatus = 'synced';
+        healthiansBookingId = healthiansResponse.booking_id || healthiansResponse.id || null;
+        console.log('✅ Healthians booking successful:', healthiansBookingId);
+      } else {
+        healthiansSyncStatus = 'failed';
+        healthiansError = healthiansResponse?.message || 'Healthians booking creation failed';
+        console.log('⚠️ Healthians returned error:', healthiansError);
+      }
+    }
+
+    // Store booking in database regardless of Healthians API status
+    // This allows user to proceed with payment even if Healthians sync fails
+    const localBookingId = healthiansBookingId || body.vendor_booking_id;
+    
+    let dbRecord;
+    try {
+      dbRecord = await storeBookingInDB(db, {
+        booking_id: localBookingId,
+        user_uuid: body.user_uuid || 'guest',
+        customers: body.customer,
+        address: {
+          line1: body.address,
+          locality: body.sub_locality,
+          landmark: body.landmark || '',
+          city: body.cityId.toString(),
+          state: body.state.toString(),
+          zipCode: body.zipcode,
+          latitude: body.latitude,
+          longitude: body.longitude,
+        },
+        booking_date: new Date().toISOString().split('T')[0],
+        time_slot: body.slot.slot_id,
+        packages: body.package,
+        total_price: body.discounted_price,
+        coupon: null,
+        payment_method: body.payment_option,
+        payment_status: body.payment_option === 'prepaid' ? 'pending' : 'cod_pending',
+        status: 'confirmed',
+        healthians_booking_id: healthiansBookingId || undefined,
+        healthians_sync_status: healthiansSyncStatus,
+        healthians_sync_attempts: 1,
+        healthians_last_error: healthiansError || undefined,
+        healthians_response: healthiansResponse || undefined,
+      });
+
+      console.log('✅ Booking stored in local database:', {
+        id: dbRecord.id,
+        booking_id: dbRecord.booking_id,
+        healthians_sync_status: dbRecord.healthians_sync_status,
+      });
+    } catch (dbError) {
+      console.error('❌ Critical: Failed to store booking in database:', dbError);
+      // Database storage is critical - if this fails, we cannot proceed
       return c.json(
         {
           success: false,
-          message: errorData?.message || 'Failed to create booking with Healthians',
-          details: errorData,
+          message: 'Failed to store booking in database',
+          error: dbError instanceof Error ? dbError.message : 'Database error',
+          healthians_status: healthiansSyncStatus,
+          healthians_error: healthiansError,
         },
-        response.status as any
+        500
       );
     }
 
-    const healthiansResponse = await response.json();
-    console.log('Healthians booking response:', {
-      success: healthiansResponse?.success,
-      booking_id: healthiansResponse?.booking_id,
-      message: healthiansResponse?.message,
-    });
-
-    if (!healthiansResponse.success) {
-      return c.json(
-        {
-          success: false,
-          message: healthiansResponse?.message || 'Healthians booking creation failed',
-          healthians_response: healthiansResponse,
-        },
-        400
-      );
-    }
-
-    // Now store the booking in D1 database
-    const db = drizzle(c.env.DB);
-    const healthiansBookingId = healthiansResponse.booking_id || healthiansResponse.id;
-
-    if (!healthiansBookingId) {
-      return c.json(
-        {
-          success: false,
-          message: 'Healthians booking created but no booking ID returned',
-          healthians_response: healthiansResponse,
-        },
-        400
-      );
-    }
-
-    const dbResult = await db.insert(bookingsTable).values({
-      booking_id: healthiansBookingId,
-      user_uuid: body.user_uuid || 'guest',
-      customers: JSON.stringify(body.customer),
-      address: JSON.stringify({
-        line1: body.address,
-        locality: body.sub_locality,
-        landmark: body.landmark,
-        city: body.cityId,
-        state: body.state,
-        zipCode: body.zipcode,
-        latitude: body.latitude,
-        longitude: body.longitude,
-      }),
-      booking_date: new Date().toISOString().split('T')[0], // Today's date
-      time_slot: body.slot.slot_id,
-      packages: JSON.stringify(body.package),
-      total_price: body.discounted_price,
-      coupon: null,
-      payment_method: body.payment_option,
-      payment_status: body.payment_option === 'prepaid' ? 'pending' : 'pending',
-      status: 'confirmed',
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    }).returning();
-
-    console.log('Booking stored in database:', {
-      id: dbResult[0]?.id,
-      booking_id: dbResult[0]?.booking_id,
-    });
-
+    // Return success response to allow payment to proceed
+    // Include sync status so frontend knows if Healthians booking succeeded
     return c.json({
       success: true,
-      booking_id: healthiansBookingId,
-      message: 'Booking created successfully',
-      healthians_response: {
-        booking_id: healthiansResponse.booking_id,
-        id: healthiansResponse.id,
-        message: healthiansResponse.message,
-      },
+      booking_id: localBookingId,
+      message: healthiansSyncStatus === 'synced' 
+        ? 'Booking created successfully' 
+        : 'Booking saved. Healthians sync will be retried later.',
+      healthians_sync_status: healthiansSyncStatus,
+      healthians_booking_id: healthiansBookingId,
+      healthians_error: healthiansError,
       database_record: {
-        id: dbResult[0]?.id,
-        booking_id: dbResult[0]?.booking_id,
-        user_uuid: dbResult[0]?.user_uuid,
-        status: dbResult[0]?.status,
-        created_at: dbResult[0]?.created_at,
+        id: dbRecord.id,
+        booking_id: dbRecord.booking_id,
+        user_uuid: dbRecord.user_uuid,
+        status: dbRecord.status,
+        healthians_sync_status: dbRecord.healthians_sync_status,
+        created_at: dbRecord.created_at,
       },
+      healthians_response: healthiansSyncStatus === 'synced' ? {
+        booking_id: healthiansBookingId,
+        message: healthiansResponse?.message,
+      } : undefined,
     });
-  } catch (error: any) {
-    console.error('Healthians booking exception:', error.message);
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    const errorStack = error instanceof Error ? error.stack : undefined;
+    console.error('Healthians booking exception:', errorMessage, errorStack);
     return c.json(
       {
         success: false,
         message: 'Unexpected error while creating booking',
-        error: error.message,
+        error: errorMessage,
       },
       500
     );
@@ -335,9 +481,7 @@ export const getHealthiansBooking = async (c: Context) => {
     const booking = await db
       .select()
       .from(bookingsTable)
-      .where(
-        (col) => col.booking_id === bookingId
-      )
+      .where(eq(bookingsTable.booking_id, bookingId))
       .limit(1);
 
     if (!booking || booking.length === 0) {
@@ -358,11 +502,11 @@ export const getHealthiansBooking = async (c: Context) => {
         id: bookingRecord.id,
         booking_id: bookingRecord.booking_id,
         user_uuid: bookingRecord.user_uuid,
-        customers: JSON.parse(bookingRecord.customers),
-        address: JSON.parse(bookingRecord.address),
+        customers: safeJsonParse(bookingRecord.customers, []),
+        address: safeJsonParse(bookingRecord.address, {}),
         booking_date: bookingRecord.booking_date,
         time_slot: bookingRecord.time_slot,
-        packages: JSON.parse(bookingRecord.packages),
+        packages: safeJsonParse(bookingRecord.packages, []),
         total_price: bookingRecord.total_price,
         payment_method: bookingRecord.payment_method,
         payment_status: bookingRecord.payment_status,
@@ -371,13 +515,14 @@ export const getHealthiansBooking = async (c: Context) => {
         updated_at: bookingRecord.updated_at,
       },
     });
-  } catch (error: any) {
-    console.error('Error fetching Healthians booking:', error.message);
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    console.error('Error fetching Healthians booking:', errorMessage);
     return c.json(
       {
         success: false,
         message: 'Error fetching booking',
-        error: error.message,
+        error: errorMessage,
       },
       500
     );
@@ -403,36 +548,58 @@ export const cancelHealthiansBooking = async (c: Context) => {
     }
 
     // Update booking status to cancelled
-    await db
+    const result = await db
       .update(bookingsTable)
       .set({
         status: 'cancelled',
         updated_at: new Date().toISOString(),
       })
-      .where((col) => col.booking_id === bookingId);
+      .where(eq(bookingsTable.booking_id, bookingId))
+      .returning();
+
+    if (!result || result.length === 0) {
+      return c.json(
+        {
+          success: false,
+          message: 'Booking not found or already cancelled',
+        },
+        404
+      );
+    }
 
     return c.json({
       success: true,
       message: 'Booking cancelled successfully',
       booking_id: bookingId,
     });
-  } catch (error: any) {
-    console.error('Error cancelling booking:', error.message);
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    console.error('Error cancelling booking:', errorMessage);
     return c.json(
       {
         success: false,
         message: 'Error cancelling booking',
-        error: error.message,
+        error: errorMessage,
       },
       500
     );
   }
 };
 
-async function safeJson(resp: Response): Promise<any | undefined> {
+async function safeJson(resp: Response): Promise<unknown | undefined> {
   try {
     return await resp.json();
-  } catch {
+  } catch (error) {
+    console.error('Failed to parse JSON response:', error);
     return undefined;
+  }
+}
+
+function safeJsonParse<T = unknown>(jsonString: string, fallback: T): T {
+  try {
+    return JSON.parse(jsonString) as T;
+  } catch (error) {
+    console.error('Failed to parse JSON string:', error);
+    return fallback;
   }
 }

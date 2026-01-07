@@ -4,6 +4,74 @@ import { drizzle } from 'drizzle-orm/d1';
 import { eq, desc, and } from 'drizzle-orm';
 import { bookings } from '../../db/schema';
 
+interface StoreBookingParams {
+  booking_id: string;
+  user_uuid: string;
+  customers: unknown[];
+  address: Record<string, unknown>;
+  booking_date: string;
+  time_slot: string;
+  packages: unknown[];
+  total_price: number;
+  coupon?: Record<string, unknown> | null;
+  payment_method: string;
+  payment_status?: string;
+  status?: string;
+  healthians_booking_id?: string;
+  healthians_sync_status?: 'pending' | 'synced' | 'failed';
+  healthians_sync_attempts?: number;
+  healthians_last_error?: string;
+  healthians_response?: unknown;
+}
+
+/**
+ * Store booking in database with proper error handling
+ * Returns the created booking record or throws an error
+ */
+export async function storeBookingInDB(
+  db: ReturnType<typeof drizzle>,
+  params: StoreBookingParams
+) {
+  try {
+    const result = await db.insert(bookings).values({
+      booking_id: params.booking_id,
+      user_uuid: params.user_uuid || 'guest',
+      customers: JSON.stringify(params.customers),
+      address: JSON.stringify(params.address),
+      booking_date: params.booking_date,
+      time_slot: params.time_slot,
+      packages: JSON.stringify(params.packages),
+      total_price: params.total_price,
+      coupon: params.coupon ? JSON.stringify(params.coupon) : null,
+      payment_method: params.payment_method,
+      payment_status: params.payment_status || 'pending',
+      status: params.status || 'confirmed',
+      healthians_booking_id: params.healthians_booking_id || null,
+      healthians_sync_status: params.healthians_sync_status || 'pending',
+      healthians_sync_attempts: params.healthians_sync_attempts || 0,
+      healthians_last_error: params.healthians_last_error || null,
+      healthians_response: params.healthians_response ? JSON.stringify(params.healthians_response) : null,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }).returning();
+
+    if (!result || result.length === 0) {
+      throw new Error('Failed to store booking: No record returned');
+    }
+
+    console.log('✅ Booking stored in database:', {
+      id: result[0].id,
+      booking_id: result[0].booking_id,
+      healthians_sync_status: result[0].healthians_sync_status,
+    });
+
+    return result[0];
+  } catch (error) {
+    console.error('❌ Database storage error:', error);
+    throw error;
+  }
+}
+
 export const getAllBookings = async (c: Context) => {
   try {
     const db = drizzle(c.env.DB);

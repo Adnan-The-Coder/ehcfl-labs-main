@@ -64,6 +64,13 @@ export const bookings = sqliteTable("bookings", {
   // Booking status
   status: text("status").notNull().default("confirmed"), // 'confirmed', 'completed', 'cancelled'
   
+  // Healthians integration tracking
+  healthians_booking_id: text("healthians_booking_id"), // Healthians booking ID if synced
+  healthians_sync_status: text("healthians_sync_status").notNull().default("pending"), // 'pending', 'synced', 'failed'
+  healthians_sync_attempts: integer("healthians_sync_attempts").notNull().default(0),
+  healthians_last_error: text("healthians_last_error"), // Last error message from Healthians API
+  healthians_response: text("healthians_response"), // Full Healthians API response (JSON)
+  
   // Timestamps
   created_at: text("created_at")
     .notNull()

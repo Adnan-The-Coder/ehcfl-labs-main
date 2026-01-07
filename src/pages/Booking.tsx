@@ -138,7 +138,7 @@ const Booking = () => {
           console.log('2️⃣ Saving to localStorage:', locationData);
           localStorage.setItem(LOCATION_CACHE_KEY, JSON.stringify(locationData));
           
-          // Verify save
+          // Verify save IMMEDIATELY
           const saved = localStorage.getItem(LOCATION_CACHE_KEY);
           if (!saved) {
             toast({
@@ -149,9 +149,23 @@ const Booking = () => {
             setIsSubmitting(false);
             return;
           }
+
+          // Parse and verify the saved data has all required fields
+          const parsedData = JSON.parse(saved);
+          if (!parsedData.zone_id || !parsedData.latitude || !parsedData.longitude || !parsedData.zipcode) {
+            console.error('❌ Incomplete location data saved:', parsedData);
+            toast({
+              variant: 'destructive',
+              title: 'Storage Error',
+              description: 'Location data incomplete. Please try again.',
+            });
+            setIsSubmitting(false);
+            return;
+          }
+
           console.log('✅ Verified in localStorage:', saved);
 
-          // 4. Update React state (this can be slow/async)
+          // 4. Update React state with location data
           console.log('3️⃣ Updating React state...');
           setBookingData(prev => ({
             ...prev,
@@ -161,7 +175,7 @@ const Booking = () => {
             zipcode: pinCode,
           }));
 
-          // 5. Navigate (DateTimeStep will read from localStorage)
+          // 5. Navigate to next step - DateTimeStep will read from localStorage
           console.log('4️⃣ Navigating to DateTimeStep...');
           setCurrentStep(3);
           window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -216,8 +230,33 @@ const Booking = () => {
       const userUuid = session.user.id;
       const primaryCustomer = bookingData.customers[0];
       
-      // Use zone_id obtained during address verification (step 2)
-      if (!bookingData.zone_id) {
+      // Try to get zone_id from state first, then fallback to localStorage
+      let zoneId = bookingData.zone_id;
+      let locationData = null;
+      
+      if (!zoneId) {
+        // Fallback to localStorage if state is empty
+        const cachedLocation = localStorage.getItem(LOCATION_CACHE_KEY);
+        if (cachedLocation) {
+          try {
+            locationData = JSON.parse(cachedLocation);
+            zoneId = locationData.zone_id;
+            console.log('✅ Retrieved zone_id from localStorage:', zoneId);
+            // Update state with cached location data
+            setBookingData(prev => ({
+              ...prev,
+              zone_id: zoneId,
+              latitude: locationData.latitude,
+              longitude: locationData.longitude,
+              zipcode: locationData.zipcode,
+            }));
+          } catch (error) {
+            console.error('❌ Failed to parse cached location:', error);
+          }
+        }
+      }
+      
+      if (!zoneId) {
         toast({
           variant: 'destructive',
           title: 'Location Verification Required',
@@ -227,9 +266,8 @@ const Booking = () => {
         return;
       }
 
-      const zoneId = bookingData.zone_id;
-
       console.log('✅ Using verified zone_id:', zoneId);
+      console.log('✅ Booking Data:', { zone_id: zoneId, latitude: bookingData.latitude || locationData?.latitude, longitude: bookingData.longitude || locationData?.longitude, zipcode: bookingData.zipcode || bookingData.address?.pinCode });
       
       // Prepare Healthians booking payload
       const discountedPrice = appliedCoupon ? totalPrice - appliedCoupon.discount : totalPrice;
@@ -238,6 +276,14 @@ const Booking = () => {
       const slotParts = bookingData.timeSlot.split('|');
       const slotId = slotParts[1] || slotParts[0];
       
+      // Helper function to map gender to single character
+      const mapGender = (gender: string): string => {
+        const g = gender.toLowerCase().trim();
+        if (g === 'male' || g === 'm') return 'M';
+        if (g === 'female' || g === 'f') return 'F';
+        return 'O'; // Other
+      };
+      
       const healthiansPayload = {
         customer: bookingData.customers.map((cust, idx) => ({
           customer_id: `CUST-${userUuid.substring(0, 12)}-${idx}`,
@@ -245,7 +291,7 @@ const Booking = () => {
           relation: idx === 0 ? 'self' : 'family',
           age: parseInt(cust.age),
           dob: cust.email || '', // Using email as placeholder; adjust if you have DOB field
-          gender: cust.gender === 'Male' ? 'M' : cust.gender === 'Female' ? 'F' : 'O',
+          gender: mapGender(cust.gender),
           contact_number: cust.phone,
           email: cust.email,
           application_number: `APP-${Date.now()}`,
@@ -261,16 +307,16 @@ const Booking = () => {
         ],
         customer_calling_number: primaryCustomer.phone,
         billing_cust_name: primaryCustomer.name.toUpperCase(),
-        gender: primaryCustomer.gender === 'Male' ? 'M' : primaryCustomer.gender === 'Female' ? 'F' : 'O',
+        gender: mapGender(primaryCustomer.gender),
         mobile: primaryCustomer.phone,
         email: primaryCustomer.email,
         state: 26, // Default to Haryana (adjust as needed)
         cityId: 23, // Default to Gurgaon (adjust as needed)
         sub_locality: `${bookingData.address?.line1}, ${bookingData.address?.locality}`,
-        latitude: String(28.5088974), // Default Gurgaon coords
-        longitude: String(77.0750786),
+        latitude: bookingData.latitude || locationData?.latitude || String(28.5088974), // Use cached or default Gurgaon coords
+        longitude: bookingData.longitude || locationData?.longitude || String(77.0750786),
         address: bookingData.address?.line1 || 'Address',
-        zipcode: bookingData.address?.pinCode || pincode,
+        zipcode: bookingData.zipcode || bookingData.address?.pinCode || pincode,
         landmark: bookingData.address?.landmark,
         altmobile: '',
         altemail: '',

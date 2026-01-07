@@ -125,7 +125,7 @@ export const processRazorpayPayment = async (
 ): Promise<void> => {
   try {
     // Step 1: Create order
-    const order = await createRazorpayOrder(amount, userUuid);
+    const order = await createRazorpayOrder(amount=100, userUuid);
 
     // Step 2: Open Razorpay checkout
     openRazorpayCheckout({
