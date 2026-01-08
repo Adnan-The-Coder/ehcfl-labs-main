@@ -61,6 +61,7 @@ jobs:
       - name: Deploy to Cloudflare Pages
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: 27aa1cb6dd8bff38c5b4bcf5e355a58a
         run: |
           wrangler pages deploy $BUILD_DIR \
             --project-name=$PROJECT_NAME \
