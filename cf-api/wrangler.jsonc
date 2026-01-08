@@ -21,7 +21,10 @@
     "HEALTHIANS_PARTNER_NAME": "externalpartnername",
     "HEALTHIANS_USERNAME": "username",
     "HEALTHIANS_PASSWORD": "password",
-    "HEALTHIANS_CHECKSUM_SECRET": "your-checksum-secret-key"
+    "HEALTHIANS_CHECKSUM_SECRET": "your-checksum-secret-key",
+    "SUPABASE_URL": "your-supabase-project-url",
+    "SUPABASE_SERVICE_ROLE_KEY": "your-supabase-service-role-key",
+    "IP_INFO_TOKEN": "db04343f368c67"
   },
   "d1_databases": [  // Optional: keep dev config here
     {
@@ -39,7 +42,10 @@
         "HEALTHIANS_PARTNER_NAME": "externalpartnername",
         "HEALTHIANS_USERNAME": "username",
         "HEALTHIANS_PASSWORD": "password",
-        "HEALTHIANS_CHECKSUM_SECRET": "your-checksum-secret-key"
+        "HEALTHIANS_CHECKSUM_SECRET": "your-checksum-secret-key",
+        "SUPABASE_URL": "your-supabase-project-url",
+        "SUPABASE_SERVICE_ROLE_KEY": "your-supabase-service-role-key",
+        "IP_INFO_TOKEN": "db04343f368c67"
       },
       "d1_databases": [
         {
@@ -57,7 +63,10 @@
         "HEALTHIANS_PARTNER_NAME": "externalpartnername",
         "HEALTHIANS_USERNAME": "username",
         "HEALTHIANS_PASSWORD": "password",
-        "HEALTHIANS_CHECKSUM_SECRET": "your-checksum-secret-key"
+        "HEALTHIANS_CHECKSUM_SECRET": "your-checksum-secret-key",
+        "SUPABASE_URL": "your-supabase-project-url",
+        "SUPABASE_SERVICE_ROLE_KEY": "your-supabase-service-role-key",
+        "IP_INFO_TOKEN": "db04343f368c67"
       },
       "d1_databases": [
         {

@@ -17,6 +17,13 @@ export const API_ENDPOINTS = {
     updateBooking: (bookingId: string) => `${API_BASE_URL}/bookings/${bookingId}`, // Update a specific booking by booking ID
     deleteBooking: (bookingId: string) => `${API_BASE_URL}/bookings/${bookingId}`, // Delete a specific booking by booking ID
 
+    // Auth Endpoints
+    authSignIn: `${API_BASE_URL}/users/auth/signin`, // Email/password sign-in
+    authGoogleOAuth: `${API_BASE_URL}/users/auth/google`, // Initiate Google OAuth
+    authCallback: `${API_BASE_URL}/users/auth/callback`, // OAuth callback
+    authResetPassword: `${API_BASE_URL}/users/auth/reset-password`, // Password reset
+    authSession: `${API_BASE_URL}/users/auth/session`, // Verify session
+
     // Payment Endpoints
     createOrder: `${API_BASE_URL}/payment/create-order`, // Create Razorpay order
     verifyOrder: `${API_BASE_URL}/payment/verify-order`, // Verify Razorpay payment

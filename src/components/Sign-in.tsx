@@ -151,116 +151,53 @@ const SignIn: React.FC<SignInProps> = ({ isOpen, onClose, redirectUrl }) => {
     setAccountNotFound(false);
 
     try {
-      // Get location info
-      const locationInfo = await getIpAndLocation();
-      
-      // Attempt to sign in with email and password
-      const { data, error: signInError } = await supabase.auth.signInWithPassword({
-        email,
-        password,
+      // Call backend API for sign-in (backend handles Supabase and profile sync)
+      const response = await fetch(API_ENDPOINTS.authSignIn, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          email,
+          password,
+        }),
       });
 
-      if (signInError) {
-        throw signInError;
-      }
+      const result = await response.json();
 
-      if (data?.user) {
-        // Store geolocation locally
-        if (locationInfo) {
-          await storeGeolocation(locationInfo);
-        }
-
-        // Check if user profile exists in backend
-        const profileRes = await fetch(API_ENDPOINTS.getProfileByUUID(data.user.id), {
-          method: 'GET',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-        });
-
-        let profileData = null;
-        if (profileRes.ok) {
-          const profileJson = await profileRes.json();
-          if (profileJson.success && profileJson.data) {
-            profileData = profileJson.data;
-            
-            // Parse user_login_info if it's a string
-            if (profileData.user_login_info && typeof profileData.user_login_info === 'string') {
-              try {
-                profileData.user_login_info = JSON.parse(profileData.user_login_info);
-              } catch {
-                profileData.user_login_info = {};
-              }
-            }
-          }
-        }
-
-        if (!profileData) {
-          // Profile does not exist, create it
-          const createRes = await fetch(API_ENDPOINTS.createProfile, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              uuid: data.user.id,
-              full_name: data.user.user_metadata?.full_name || '',
-              email: data.user.email || '',
-              phone: data.user.user_metadata?.phone || '',
-              avatar_url: data.user.user_metadata?.avatar_url || '',
-              user_login_info: {
-                last_sign_in: new Date().toISOString(),
-                sign_in_method: 'email',
-                sign_in_count: 1,
-                ip_address: locationInfo?.ip || 'unknown',
-              },
-              created_at: new Date().toISOString(),
-              updated_at: new Date().toISOString(),
-            }),
-          });
-          if (!createRes.ok) {
-            const err = await createRes.json();
-            throw new Error(err.message || 'Failed to create user profile');
-          }
+      if (!response.ok || !result.success) {
+        if (result.accountNotFound) {
+          setAccountNotFound(true);
+          setError('Account not found. Please create an account to continue.');
         } else {
-          // Profile exists, update login info
-          const userLoginInfo = {
-            last_sign_in: new Date().toISOString(),
-            sign_in_method: 'email',
-            sign_in_count: (profileData.user_login_info?.sign_in_count || 0) + 1,
-            ip_address: locationInfo?.ip || profileData.user_login_info?.ip_address || 'unknown',
-          };
-
-          const updateRes = await fetch(API_ENDPOINTS.updateProfileByUUID(data.user.id), {
-            method: 'PATCH',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              user_login_info: userLoginInfo,
-              updated_at: new Date().toISOString(),
-            }),
-          });
-          if (!updateRes.ok) {
-            const err = await updateRes.json();
-            throw new Error(err.message || 'Failed to update user profile');
-          }
+          setError(result.message || 'Failed to sign in');
         }
-
-        // Close modal and redirect after successful sign-in
-        onClose();
-        const storedRedirectUrl = localStorage.getItem('authRedirectUrl') || '/';
-        localStorage.removeItem('authRedirectUrl');
-        navigate(storedRedirectUrl);
+        return;
       }
+
+      // Store session in local Supabase client
+      if (result.data?.session) {
+        await supabase.auth.setSession({
+          access_token: result.data.session.access_token,
+          refresh_token: result.data.session.refresh_token,
+        });
+      }
+
+      // Store location data
+      if (result.data?.location) {
+        localStorage.setItem('ehcf_user_location', JSON.stringify(result.data.location));
+        console.log('📍 Location stored:', result.data.location);
+      }
+
+      // Close modal and redirect
+      onClose();
+      const storedRedirectUrl = localStorage.getItem('authRedirectUrl') || '/';
+      localStorage.removeItem('authRedirectUrl');
+      navigate(storedRedirectUrl);
+      window.location.reload(); // Force reload to update auth state
     } catch (error: any) {
       console.error('❌ Sign in error:', error);
-      if (error.message && error.message.includes('Invalid login credentials')) {
-        setAccountNotFound(true);
-        setError('Account not found. Please create an account to continue.');
-      } else {
-        setError(error.message || 'Failed to sign in');
-      }
+      setError(error.message || 'Failed to sign in');
     } finally {
       setLoading(false);
     }
@@ -276,26 +213,25 @@ const SignIn: React.FC<SignInProps> = ({ isOpen, onClose, redirectUrl }) => {
       const urlToStore = redirectUrl || window.location.pathname;
       localStorage.setItem('authRedirectUrl', urlToStore);
 
-      // Get location before OAuth redirect
-      const locationInfo = await getIpAndLocation();
-      if (locationInfo) {
-        await storeGeolocation(locationInfo);
-      }
-
-      // Initiate Google OAuth sign-in
-      const { error: oauthError } = await supabase.auth.signInWithOAuth({
-        provider: 'google',
-        options: {
-          redirectTo: `${window.location.origin}/auth/callback`,
-          queryParams: {
-            prompt: 'select_account',
-            access_type: 'offline'
-          }
+      // Call backend API to initiate Google OAuth
+      const response = await fetch(`${API_ENDPOINTS.authGoogleOAuth}?redirectUrl=${encodeURIComponent(urlToStore)}`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
         },
       });
 
-      if (oauthError) {
-        throw oauthError;
+      const result = await response.json();
+
+      if (!response.ok || !result.success) {
+        throw new Error(result.message || 'Failed to initiate Google OAuth');
+      }
+
+      // Redirect to Google OAuth URL
+      if (result.data?.url) {
+        window.location.href = result.data.url;
+      } else {
+        throw new Error('OAuth URL not received');
       }
     } catch (error: any) {
       console.error('❌ Google sign in error:', error);
@@ -314,15 +250,22 @@ const SignIn: React.FC<SignInProps> = ({ isOpen, onClose, redirectUrl }) => {
     setError(null);
 
     try {
-      const { error: resetError } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: `${window.location.origin}/reset-password`,
+      // Call backend API for password reset
+      const response = await fetch(API_ENDPOINTS.authResetPassword, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ email }),
       });
 
-      if (resetError) {
-        throw resetError;
+      const result = await response.json();
+
+      if (!response.ok || !result.success) {
+        throw new Error(result.message || 'Failed to send reset password email');
       }
 
-      setMessage('Password reset link sent to your email');
+      setMessage(result.message || 'Password reset link sent to your email');
     } catch (error: any) {
       setError(error.message || 'Failed to send reset password email');
     } finally {
