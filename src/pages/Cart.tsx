@@ -8,7 +8,7 @@ import { useEffect, useState } from 'react';
 import { Navbar } from '@/components/Navbar';
 import { Footer } from '@/components/Footer';
 import SignIn from '@/components/Sign-in';
-import { supabase } from '@/utils/supabase/client';
+import { getUser } from '@/utils/session';
 
 const Cart = () => {
   const { items, removeItem, updateQuantity, totalItems, totalPrice, totalMRP, discount } = useCart();
@@ -18,29 +18,26 @@ const Cart = () => {
   const [isSignInOpen, setIsSignInOpen] = useState(false);
   const [user, setUser] = useState<{ id: string } | null>(null);
 
-  // Load current auth session and subscribe to changes
+  // Load user from localStorage and listen for changes
   useEffect(() => {
-    let active = true;
-    const loadSession = async () => {
-      try {
-        const { data } = await supabase.auth.getSession();
-        const sUser = data.session?.user;
-        if (active && sUser) {
-          setUser({ id: sUser.id });
-        } else if (active) {
-          setUser(null);
-        }
-      } catch {
-        setUser(null);
+    const loadUser = () => {
+      const userData = getUser();
+      setUser(userData ? { id: userData.id } : null);
+    };
+
+    loadUser();
+
+    // Listen for storage changes (for cross-tab sync)
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === 'ehcf_session' || e.key === 'ehcf_user') {
+        loadUser();
       }
     };
-    loadSession();
-    const { data: sub } = supabase.auth.onAuthStateChange(() => {
-      loadSession();
-    });
+
+    window.addEventListener('storage', handleStorageChange);
+
     return () => {
-      active = false;
-      sub.subscription.unsubscribe();
+      window.removeEventListener('storage', handleStorageChange);
     };
   }, []);
 

@@ -16,7 +16,6 @@ import {
 import { useCart } from "@/contexts/CartContext";
 import ehcfLogo from "@/assets/ehcf-logo.png";
 import SignIn from "@/components/Sign-in";
-import { supabase } from "@/utils/supabase/client";
 
 export const Navbar = () => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -29,44 +28,55 @@ export const Navbar = () => {
   } | null>(null);
   const { totalItems } = useCart();
 
-  // Load current auth session and subscribe to changes
+  // Load user from localStorage and handle storage events
   useEffect(() => {
-    let active = true;
-
-    const loadSession = async () => {
+    const loadUser = () => {
       try {
-        const { data } = await supabase.auth.getSession();
-        const sUser = data.session?.user;
-        if (active && sUser) {
+        const sessionData = localStorage.getItem('ehcf_session');
+        const userData = localStorage.getItem('ehcf_user');
+        
+        if (sessionData && userData) {
+          const parsedUser = JSON.parse(userData);
           setUser({
-            id: sUser.id,
-            email: sUser.email,
-            full_name: (sUser.user_metadata?.full_name || sUser.user_metadata?.name) ?? null,
-            avatar_url: (sUser.user_metadata?.avatar_url || sUser.user_metadata?.picture) ?? null,
+            id: parsedUser.id,
+            email: parsedUser.email,
+            full_name: parsedUser.user_metadata?.full_name || parsedUser.user_metadata?.name || null,
+            avatar_url: parsedUser.user_metadata?.avatar_url || parsedUser.user_metadata?.picture || null,
           });
-        } else if (active) {
+        } else {
           setUser(null);
         }
-      } catch {
-        // ignore
+      } catch (error) {
+        console.error('Error loading user from localStorage:', error);
+        setUser(null);
       }
     };
 
-    loadSession();
+    // Load user on mount
+    loadUser();
 
-    const { data: sub } = supabase.auth.onAuthStateChange(() => {
-      loadSession();
-    });
+    // Listen for storage changes (for cross-tab sync)
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === 'ehcf_session' || e.key === 'ehcf_user') {
+        loadUser();
+      }
+    };
+
+    window.addEventListener('storage', handleStorageChange);
 
     return () => {
-      active = false;
-      sub.subscription.unsubscribe();
+      window.removeEventListener('storage', handleStorageChange);
     };
   }, []);
 
-  const handleSignOut = async () => {
-    await supabase.auth.signOut();
+  const handleSignOut = () => {
+    // Clear all auth data from localStorage
+    localStorage.removeItem('ehcf_session');
+    localStorage.removeItem('ehcf_user');
+    localStorage.removeItem('ehcf_user_location');
+    localStorage.removeItem('authRedirectUrl');
     setUser(null);
+    window.location.href = '/'; // Redirect to home
   };
 
   return (

@@ -246,6 +246,8 @@ export const initiateGoogleOAuth = async (c: Context) => {
     const { data, error: oauthError } = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: {
+        // Ensure Authorization Code (PKCE) flow so frontend receives ?code=
+        flowType: 'pkce',
         redirectTo: `${origin}/auth/callback?redirectUrl=${encodeURIComponent(redirectUrl)}`,
         queryParams: {
           prompt: 'select_account',

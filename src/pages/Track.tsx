@@ -10,7 +10,7 @@ import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { CheckCircle2, Clock, Phone, MapPin, Loader2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { API_ENDPOINTS } from '@/config/api';
-import { supabase } from '@/utils/supabase/client';
+import { getUserId } from '@/utils/session';
 
 interface BookingStatus {
   code: string;
@@ -73,10 +73,10 @@ const Track = () => {
         setBooking(parseBooking(json.data));
       } else {
         // Try fetching only the current user's bookings; fall back to all
-        const { data: { session } } = await supabase.auth.getSession();
+        const userId = getUserId();
         let res;
-        if (session?.user?.id) {
-          res = await fetch(API_ENDPOINTS.getBookingsByUserUUID(session.user.id));
+        if (userId) {
+          res = await fetch(API_ENDPOINTS.getBookingsByUserUUID(userId));
         } else {
           res = await fetch(API_ENDPOINTS.getAllBookings);
         }

@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { supabase } from "@/utils/supabase/client";
 import { API_ENDPOINTS } from "@/config/api";
 
 interface ApiResponse {
@@ -9,6 +8,7 @@ interface ApiResponse {
   data?: {
     id?: string;
     user_uuid?: string;
+    uuid?: string;
     email?: string;
     full_name?: string;
     name?: string;
@@ -43,7 +43,7 @@ export function useUser() {
           console.log("🖼️ Avatar URL from API:", avatarUrl);
           
           setUser({
-            id: json.data.id || json.data.user_uuid || userId,
+            id: json.data.id || json.data.user_uuid || json.data.uuid || userId,
             email: json.data.email || "",
             full_name: json.data.full_name || json.data.name,
             avatar_url: avatarUrl,
@@ -52,20 +52,19 @@ export function useUser() {
         }
       }
 
-      // fallback: get Supabase user directly
-      console.log("🔄 Falling back to Supabase auth data");
-      const { data, error } = await supabase.auth.getUser();
-      if (!error && data.user) {
-        const avatarUrl = data.user.user_metadata?.avatar_url ||
-          data.user.identities?.[0]?.identity_data?.avatar_url;
-        console.log("🖼️ Avatar URL from Supabase:", avatarUrl);
-        console.log("👤 User metadata:", data.user.user_metadata);
-        console.log("🔗 User identities:", data.user.identities);
+      // fallback: get user from localStorage
+      console.log("🔄 Falling back to localStorage user data");
+      const userData = localStorage.getItem('ehcf_user');
+      if (userData) {
+        const parsedUser = JSON.parse(userData);
+        const avatarUrl = parsedUser.user_metadata?.avatar_url || parsedUser.user_metadata?.picture;
+        console.log("🖼️ Avatar URL from localStorage:", avatarUrl);
+        console.log("👤 User metadata:", parsedUser.user_metadata);
         
         setUser({
-          id: data.user.id,
-          email: data.user.email || "",
-          full_name: data.user.user_metadata?.full_name,
+          id: parsedUser.id,
+          email: parsedUser.email || "",
+          full_name: parsedUser.user_metadata?.full_name || parsedUser.user_metadata?.name,
           avatar_url: avatarUrl,
         });
       }
@@ -74,28 +73,43 @@ export function useUser() {
     }
   };
 
-  const checkSession = async () => {
-    const { data } = await supabase.auth.getSession();
-    if (data.session) {
-      await fetchUserProfile(data.session.user.id);
+  const checkSession = () => {
+    try {
+      const sessionData = localStorage.getItem('ehcf_session');
+      const userData = localStorage.getItem('ehcf_user');
+      
+      if (sessionData && userData) {
+        const parsedUser = JSON.parse(userData);
+        fetchUserProfile(parsedUser.id);
+      } else {
+        setUser(null);
+      }
+    } catch (error) {
+      console.error("❌ Error checking session:", error);
+      setUser(null);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   useEffect(() => {
     checkSession();
 
-    const { data: subscription } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
-        if (event === "SIGNED_IN" && session) {
-          await fetchUserProfile(session.user.id);
-        } else if (event === "SIGNED_OUT") {
-          setUser(null);
-        }
+    // Listen for storage changes (for cross-tab sync)
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === 'ehcf_session' || e.key === 'ehcf_user') {
+        checkSession();
+      } else if (e.key === null) {
+        // Storage was cleared
+        setUser(null);
       }
-    );
+    };
 
-    return () => subscription.subscription.unsubscribe();
+    window.addEventListener('storage', handleStorageChange);
+
+    return () => {
+      window.removeEventListener('storage', handleStorageChange);
+    };
   }, []);
 
   return { user, loading };

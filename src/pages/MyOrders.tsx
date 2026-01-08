@@ -11,7 +11,7 @@ import { useNavigate } from 'react-router-dom';
 import RescheduleModal from '@/components/booking/RescheduleModal';
 import CancelModal from '@/components/booking/CancelModal';
 import AddOnModal from '@/components/booking/AddOnModal';
-import { supabase } from '@/utils/supabase/client';
+import { getUserId, isAuthenticated } from '@/utils/session';
 import { API_ENDPOINTS } from '@/config/api';
 import { useToast } from '@/hooks/use-toast';
 
@@ -30,10 +30,8 @@ const MyOrders = () => {
     const fetchBookings = async () => {
       setLoading(true);
       try {
-        // Get current user session
-        const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-        
-        if (sessionError || !session) {
+        // Check if user is authenticated
+        if (!isAuthenticated()) {
           toast({
             variant: 'destructive',
             title: 'Authentication Required',
@@ -43,7 +41,16 @@ const MyOrders = () => {
           return;
         }
 
-        const userUuid = session.user.id;
+        const userUuid = getUserId();
+        if (!userUuid) {
+          toast({
+            variant: 'destructive',
+            title: 'User Error',
+            description: 'Could not retrieve user information.',
+          });
+          navigate('/');
+          return;
+        }
 
         // Fetch bookings from API
         const response = await fetch(API_ENDPOINTS.getBookingsByUserUUID(userUuid));

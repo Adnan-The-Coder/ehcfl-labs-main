@@ -4,7 +4,6 @@ import { useState, useEffect, useId } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Mail, Lock, Eye, EyeOff, AlertCircle, Loader2, X, Info } from 'lucide-react';
 
-import { supabase } from '@/utils/supabase/client';
 import { API_ENDPOINTS } from '@/config/api';
 import ehcfLogo from '@/assets/ehcf-logo.png';
 
@@ -12,30 +11,6 @@ interface SignInProps {
   isOpen: boolean;
   onClose: () => void;
   redirectUrl?: string;
-}
-
-// Interface for IP geolocation data
-interface GeoLocation {
-  ip: string;
-  city?: string;
-  region?: string;
-  country?: string;
-  loc?: string;
-  org?: string;
-  postal?: string;
-  timezone?: string;
-}
-
-// Interface for stored location data
-interface StoredLocation {
-  coordinates: string;
-  city: string;
-  region: string;
-  country: string;
-  postal: string;
-  timezone: string;
-  address: string;
-  lastUpdated: string;
 }
 
 const SignIn: React.FC<SignInProps> = ({ isOpen, onClose, redirectUrl }) => {
@@ -90,59 +65,6 @@ const SignIn: React.FC<SignInProps> = ({ isOpen, onClose, redirectUrl }) => {
     }
   }, [isOpen, redirectUrl]);
 
-  // Function to get the user's IP address and geolocation
-  const getIpAndLocation = async (): Promise<GeoLocation | null> => {
-    try {
-      // First get the IP address
-      const ipResponse = await fetch('https://api.ipify.org?format=json');
-      const ipData = await ipResponse.json();
-      const ip = ipData.ip;
-      
-      const IP_INFO_TOKEN = import.meta.env.VITE_PUBLIC_IP_INFO_TOKEN || 'db04343f368c67';
-      
-      // Then get geolocation data
-      const geoResponse = await fetch(`https://ipinfo.io/${ip}/json?token=${IP_INFO_TOKEN}`);
-      const geoData = await geoResponse.json();
-      
-      return {
-        ip,
-        city: geoData.city || 'Unknown',
-        region: geoData.region || 'Unknown',
-        country: geoData.country || 'Unknown',
-        loc: geoData.loc || '0,0',
-        org: geoData.org || 'Unknown',
-        postal: geoData.postal || 'Unknown',
-        timezone: geoData.timezone || 'Unknown'
-      };
-    } catch (error) {
-      console.error('❌ Error fetching IP or location:', error);
-      return null;
-    }
-  };
-
-  // Store geolocation data in localStorage
-  const storeGeolocation = async (locationInfo: GeoLocation) => {
-    try {
-      const formattedAddress = `${locationInfo.city}, ${locationInfo.region}, ${locationInfo.country} ${locationInfo.postal}`;
-      
-      const storedLocation: StoredLocation = {
-        coordinates: locationInfo.loc || '0,0',
-        city: locationInfo.city || 'Unknown',
-        region: locationInfo.region || 'Unknown',
-        country: locationInfo.country || 'Unknown',
-        postal: locationInfo.postal || 'Unknown',
-        timezone: locationInfo.timezone || 'Unknown',
-        address: formattedAddress,
-        lastUpdated: new Date().toISOString()
-      };
-
-      localStorage.setItem('ehcf_user_location', JSON.stringify(storedLocation));
-      console.log('📍 Location stored:', storedLocation);
-    } catch (error) {
-      console.error('❌ Error storing location:', error);
-    }
-  };
-
   const handleEmailSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
@@ -151,7 +73,7 @@ const SignIn: React.FC<SignInProps> = ({ isOpen, onClose, redirectUrl }) => {
     setAccountNotFound(false);
 
     try {
-      // Call backend API for sign-in (backend handles Supabase and profile sync)
+      // Call backend API for sign-in (backend handles everything)
       const response = await fetch(API_ENDPOINTS.authSignIn, {
         method: 'POST',
         headers: {
@@ -175,18 +97,22 @@ const SignIn: React.FC<SignInProps> = ({ isOpen, onClose, redirectUrl }) => {
         return;
       }
 
-      // Store session in local Supabase client
+      // Store session data in localStorage
       if (result.data?.session) {
-        await supabase.auth.setSession({
-          access_token: result.data.session.access_token,
-          refresh_token: result.data.session.refresh_token,
-        });
+        localStorage.setItem('ehcf_session', JSON.stringify(result.data.session));
+        console.log('✅ Session stored');
+      }
+
+      // Store user data
+      if (result.data?.user) {
+        localStorage.setItem('ehcf_user', JSON.stringify(result.data.user));
+        console.log('✅ User data stored');
       }
 
       // Store location data
       if (result.data?.location) {
         localStorage.setItem('ehcf_user_location', JSON.stringify(result.data.location));
-        console.log('📍 Location stored:', result.data.location);
+        console.log('📍 Location stored');
       }
 
       // Close modal and redirect

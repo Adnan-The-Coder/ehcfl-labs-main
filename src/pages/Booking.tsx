@@ -12,7 +12,7 @@ import AddressStep from '@/components/booking/AddressStep';
 import DateTimeStep from '@/components/booking/DateTimeStep';
 import ReviewStep from '@/components/booking/ReviewStep';
 import { CheckCircle2 } from 'lucide-react';
-import { supabase } from '@/utils/supabase/client';
+import { getUserId, isAuthenticated } from '@/utils/session';
 import { API_ENDPOINTS } from '@/config/api';
 import { useToast } from '@/hooks/use-toast';
 import { processRazorpayPayment } from '@/utils/razorpay';
@@ -214,10 +214,8 @@ const Booking = () => {
       logDateDebug();
       console.log('📅 Selected Date:', bookingData.date);
       
-      // Get current user session
-      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-      
-      if (sessionError || !session) {
+      // Check if user is authenticated
+      if (!isAuthenticated()) {
         toast({
           variant: 'destructive',
           title: 'Authentication Error',
@@ -227,7 +225,16 @@ const Booking = () => {
         return;
       }
 
-      const userUuid = session.user.id;
+      const userUuid = getUserId();
+      if (!userUuid) {
+        toast({
+          variant: 'destructive',
+          title: 'Authentication Error',
+          description: 'User ID not found. Please log in again.',
+        });
+        navigate('/cart');
+        return;
+      }
       const primaryCustomer = bookingData.customers[0];
       
       // Try to get zone_id from state first, then fallback to localStorage
