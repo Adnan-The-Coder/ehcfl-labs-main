@@ -8,6 +8,12 @@ export interface CloudflareBindings {
   ENABLE_DETAILED_LOGGING?: string;
   ENABLE_PERFORMANCE_MONITORING?: string;
 
+  // Supabase
+  SUPABASE_URL?: string;
+  SUPABASE_SERVICE_ROLE_KEY?: string;
+  SUPABASE_ANON_KEY?: string;
+  IP_INFO_TOKEN?: string;
+
   // Database
   JWT_SECRET?: string;
   DATABASE_URL?: string;

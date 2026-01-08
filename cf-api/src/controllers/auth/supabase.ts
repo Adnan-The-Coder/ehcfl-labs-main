@@ -1,22 +1,26 @@
 import { Context } from 'hono';
 import { createClient } from '@supabase/supabase-js';
+import { getCookie, setCookie } from 'hono/cookie';
+import { CloudflareBindings } from '../../types';
 
 /**
  * Initialize Supabase client with environment variables
  */
-const getSupabaseClient = (env: any) => {
+const getSupabaseClient = (env: CloudflareBindings, storage?: Parameters<typeof createClient>[2]['auth']['storage']) => { 
   const supabaseUrl = env.SUPABASE_URL;
-  const supabaseServiceKey = env.SUPABASE_SERVICE_ROLE_KEY;
+  // Prefer service role for server-side auth, but fall back to anon for local/dev if absent
+  const supabaseServiceKey = env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_ANON_KEY;
 
   if (!supabaseUrl || !supabaseServiceKey) {
-    throw new Error('SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be configured in wrangler.jsonc');
+    throw new Error('SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY (or SUPABASE_ANON_KEY) must be configured (use .dev.vars or wrangler secrets).');
   }
 
   return createClient(supabaseUrl, supabaseServiceKey, {
     auth: {
       autoRefreshToken: false,
       persistSession: false,
-      detectSessionInUrl: false
+      detectSessionInUrl: false,
+      storage,
     }
   });
 };
@@ -61,10 +65,19 @@ const getIpAndLocation = async (ip: string, env: any) => {
  */
 const syncUserProfile = async (userId: string, userData: any, locationInfo: any, isNewUser: boolean, c: Context) => {
   try {
+    console.log('📝 [DB Sync] Starting profile sync for user:', userId);
+    console.log('📝 [DB Sync] User data:', JSON.stringify(userData, null, 2));
+    console.log('📝 [DB Sync] Is new user:', isNewUser);
+    
     const db = c.env.DB;
+    if (!db) {
+      console.error('❌ [DB Sync] D1 database binding not found!');
+      throw new Error('Database not configured');
+    }
+    
     const { drizzle } = await import('drizzle-orm/d1');
     const { eq } = await import('drizzle-orm');
-    const { usersTable } = await import('../../db/schema');
+    const { userProfiles } = await import('../../db/schema');
     const dbInstance = drizzle(db);
 
     if (isNewUser) {
@@ -86,15 +99,17 @@ const syncUserProfile = async (userId: string, userData: any, locationInfo: any,
         updated_at: new Date().toISOString(),
       };
 
-      await dbInstance.insert(usersTable).values(newProfile);
-      console.log('✅ Profile created for user:', userId);
+      console.log('📝 [DB Sync] Inserting new profile:', JSON.stringify(newProfile, null, 2));
+      const result = await dbInstance.insert(userProfiles).values(newProfile);
+      console.log('✅ [DB Sync] Profile created successfully for user:', userId);
+      console.log('✅ [DB Sync] Insert result:', JSON.stringify(result, null, 2));
       return newProfile;
     } else {
       // Update existing profile
       const existingProfile = await dbInstance
         .select()
-        .from(usersTable)
-        .where(eq(usersTable.uuid, userId))
+        .from(userProfiles)
+        .where(eq(userProfiles.uuid, userId))
         .limit(1);
 
       let existingLoginInfo: any = {};
@@ -116,17 +131,22 @@ const syncUserProfile = async (userId: string, userData: any, locationInfo: any,
         ip_address: locationInfo?.ip || existingLoginInfo?.ip_address || 'unknown',
       });
 
-      await dbInstance
-        .update(usersTable)
-        .set({
-          avatar_url: userData.avatar_url || userData.picture || existingProfile[0]?.avatar_url,
-          full_name: userData.full_name || userData.name || existingProfile[0]?.full_name,
-          user_login_info: userLoginInfo,
-          updated_at: new Date().toISOString(),
-        })
-        .where(eq(usersTable.uuid, userId));
+      console.log('📝 [DB Sync] Updating existing profile...');
+      const updateData = {
+        avatar_url: userData.avatar_url || userData.picture || existingProfile[0]?.avatar_url,
+        full_name: userData.full_name || userData.name || existingProfile[0]?.full_name,
+        user_login_info: userLoginInfo,
+        updated_at: new Date().toISOString(),
+      };
+      console.log('📝 [DB Sync] Update data:', JSON.stringify(updateData, null, 2));
+      
+      const result = await dbInstance
+        .update(userProfiles)
+        .set(updateData)
+        .where(eq(userProfiles.uuid, userId));
 
-      console.log('✅ Profile updated for user:', userId);
+      console.log('✅ [DB Sync] Profile updated successfully for user:', userId);
+      console.log('✅ [DB Sync] Update result:', JSON.stringify(result, null, 2));
       return { ...existingProfile[0], user_login_info: userLoginInfo };
     }
   } catch (error) {
@@ -139,7 +159,7 @@ const syncUserProfile = async (userId: string, userData: any, locationInfo: any,
  * POST /auth/signin
  * Handle email/password sign-in
  */
-export const emailSignIn = async (c: Context) => {
+export const emailSignIn = async (c: Context<{ Bindings: CloudflareBindings }>) => {
   try {
     const { email, password } = await c.req.json();
 
@@ -179,13 +199,13 @@ export const emailSignIn = async (c: Context) => {
     const db = c.env.DB;
     const { drizzle } = await import('drizzle-orm/d1');
     const { eq } = await import('drizzle-orm');
-    const { usersTable } = await import('../../db/schema');
+    const { userProfiles } = await import('../../db/schema');
     const dbInstance = drizzle(db);
 
     const existingProfile = await dbInstance
       .select()
-      .from(usersTable)
-      .where(eq(usersTable.uuid, data.user.id))
+      .from(userProfiles)
+      .where(eq(userProfiles.uuid, data.user.id))
       .limit(1);
 
     const isNewUser = !existingProfile || existingProfile.length === 0;
@@ -236,19 +256,42 @@ export const emailSignIn = async (c: Context) => {
  * GET /auth/google
  * Initiate Google OAuth flow
  */
-export const initiateGoogleOAuth = async (c: Context) => {
+export const initiateGoogleOAuth = async (c: Context<{ Bindings: CloudflareBindings }>) => {
   try {
+    console.log('🔵 [Google OAuth] Initiating Google OAuth flow...');
     const redirectUrl = c.req.query('redirectUrl') || '/';
-    const supabase = getSupabaseClient(c.env);
+    console.log('🔵 [Google OAuth] Redirect URL:', redirectUrl);
+
+    // In-memory storage to capture PKCE verifier and set it as cookie
+    const tempStore: Record<string, string> = {};
+    const storage = {
+      getItem: (key: string) => {
+        console.log('🔵 [Storage] getItem:', key, '=', tempStore[key] || 'null');
+        return tempStore[key] ?? null;
+      },
+      setItem: (key: string, value: string) => { 
+        console.log('🔵 [Storage] setItem:', key, '=', value.substring(0, 20) + '...');
+        tempStore[key] = value; 
+      },
+      removeItem: (key: string) => { 
+        console.log('🔵 [Storage] removeItem:', key);
+        delete tempStore[key]; 
+      },
+    };
+
+    const supabase = getSupabaseClient(c.env, storage);
 
     const origin = c.req.header('origin') || c.req.header('referer')?.split('/').slice(0, 3).join('/') || '';
+    console.log('🔵 [Google OAuth] Origin:', origin);
+    const callbackUrl = `${origin}/auth/callback?redirectUrl=${encodeURIComponent(redirectUrl)}`;
+    console.log('🔵 [Google OAuth] Callback URL:', callbackUrl);
     
     const { data, error: oauthError } = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: {
         // Ensure Authorization Code (PKCE) flow so frontend receives ?code=
         flowType: 'pkce',
-        redirectTo: `${origin}/auth/callback?redirectUrl=${encodeURIComponent(redirectUrl)}`,
+        redirectTo: callbackUrl,
         queryParams: {
           prompt: 'select_account',
           access_type: 'offline'
@@ -257,10 +300,32 @@ export const initiateGoogleOAuth = async (c: Context) => {
     });
 
     if (oauthError) {
-      console.error('❌ Google OAuth initiation error:', oauthError);
+      console.error('❌ [Google OAuth] Initiation error:', oauthError);
       return c.json({ success: false, message: oauthError.message }, 400);
     }
 
+    // Persist PKCE verifier for the callback exchange
+    const pkceVerifier = tempStore['pkce_code_verifier'] || tempStore['sb-pkce-code-verifier'];
+    console.log('🔵 [Google OAuth] PKCE verifier captured:', pkceVerifier ? 'YES' : 'NO');
+    
+    if (pkceVerifier) {
+      // Determine if we're in a secure context (HTTPS or localhost for dev)
+      const isSecure = origin.startsWith('https://') || origin.includes('localhost') || origin.includes('127.0.0.1');
+      const isLocalDev = origin.includes('127.0.0.1') || origin.includes('localhost');
+      
+      setCookie(c, 'sb-pkce-verifier', pkceVerifier, {
+        httpOnly: true,
+        secure: isSecure && !isLocalDev, // true for production HTTPS, false for local dev
+        sameSite: 'Lax',
+        path: '/',
+        maxAge: 300,
+      });
+      console.log('✅ [Google OAuth] PKCE verifier stored in cookie (secure:', isSecure && !isLocalDev, 'origin:', origin, ')');
+    } else {
+      console.warn('⚠️ [Google OAuth] No PKCE verifier captured!');
+    }
+
+    console.log('✅ [Google OAuth] OAuth URL generated:', data.url?.substring(0, 50) + '...');
     return c.json({
       success: true,
       data: {
@@ -269,7 +334,7 @@ export const initiateGoogleOAuth = async (c: Context) => {
       },
     });
   } catch (error: any) {
-    console.error('❌ Error in initiateGoogleOAuth:', error);
+    console.error('❌ [Google OAuth] Error in initiateGoogleOAuth:', error);
     return c.json({ success: false, message: error.message || 'Internal server error' }, 500);
   }
 };
@@ -278,29 +343,67 @@ export const initiateGoogleOAuth = async (c: Context) => {
  * GET /auth/callback
  * Handle OAuth callback (Google)
  */
-export const handleOAuthCallback = async (c: Context) => {
+export const handleOAuthCallback = async (c: Context<{ Bindings: CloudflareBindings }>) => {
   try {
+    console.log('🟢 [OAuth Callback] Processing OAuth callback...');
     const code = c.req.query('code');
     const redirectUrl = c.req.query('redirectUrl') || '/';
+    console.log('🟢 [OAuth Callback] Code received:', code ? 'YES' : 'NO');
+    console.log('🟢 [OAuth Callback] Redirect URL:', redirectUrl);
 
     if (!code) {
+      console.error('❌ [OAuth Callback] No authorization code in URL');
       return c.json({ success: false, message: 'Authorization code missing' }, 400);
     }
 
-    const supabase = getSupabaseClient(c.env);
+    const pkceVerifier = getCookie(c, 'sb-pkce-verifier');
+    console.log('🟢 [OAuth Callback] PKCE verifier from cookie:', pkceVerifier ? 'FOUND' : 'MISSING');
+    
+    const storage = pkceVerifier
+      ? {
+          getItem: (key: string) => {
+            if (key === 'pkce_code_verifier' || key === 'sb-pkce-code-verifier') {
+              console.log('🟢 [Storage] Providing PKCE verifier for key:', key);
+              return pkceVerifier;
+            }
+            return null;
+          },
+          setItem: () => {},
+          removeItem: () => {},
+        }
+      : undefined;
+
+    if (!pkceVerifier) {
+      console.warn('⚠️ [OAuth Callback] No PKCE verifier available - exchange may fail');
+    }
+
+    const supabase = getSupabaseClient(c.env, storage);
     const clientIp = c.req.header('cf-connecting-ip') || c.req.header('x-forwarded-for') || 'unknown';
+    console.log('🟢 [OAuth Callback] Client IP:', clientIp);
 
     // Exchange code for session
+    console.log('🟢 [OAuth Callback] Exchanging code for session...');
     const { data, error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
 
     if (exchangeError) {
-      console.error('❌ Code exchange error:', exchangeError);
+      console.error('❌ [OAuth Callback] Code exchange error:', exchangeError);
+      console.error('❌ [OAuth Callback] Error details:', JSON.stringify(exchangeError, null, 2));
       return c.json({ success: false, message: exchangeError.message }, 401);
     }
 
     if (!data?.user || !data?.session) {
+      console.error('❌ [OAuth Callback] No user or session in response');
       return c.json({ success: false, message: 'Failed to establish session' }, 401);
     }
+
+    console.log('✅ [OAuth Callback] Session established for user:', data.user.id);
+    console.log('✅ [OAuth Callback] User email:', data.user.email);
+
+    // Clear one-time PKCE verifier cookie after successful exchange
+    setCookie(c, 'sb-pkce-verifier', '', {
+      path: '/',
+      maxAge: 0,
+    });
 
     // Get location info
     const locationInfo = await getIpAndLocation(clientIp, c.env);
@@ -309,32 +412,43 @@ export const handleOAuthCallback = async (c: Context) => {
     const db = c.env.DB;
     const { drizzle } = await import('drizzle-orm/d1');
     const { eq } = await import('drizzle-orm');
-    const { usersTable } = await import('../../db/schema');
+    const { userProfiles } = await import('../../db/schema');
     const dbInstance = drizzle(db);
 
     const existingProfile = await dbInstance
       .select()
-      .from(usersTable)
-      .where(eq(usersTable.uuid, data.user.id))
+      .from(userProfiles)
+      .where(eq(userProfiles.uuid, data.user.id))
       .limit(1);
 
     const isNewUser = !existingProfile || existingProfile.length === 0;
 
     // Sync user profile
-    await syncUserProfile(
-      data.user.id,
-      {
-        full_name: data.user.user_metadata?.full_name || data.user.user_metadata?.name,
-        email: data.user.email,
-        phone: data.user.user_metadata?.phone,
-        avatar_url: data.user.user_metadata?.avatar_url || data.user.user_metadata?.picture,
-        sign_in_method: 'google',
-        provider: 'google',
-      },
-      locationInfo,
-      isNewUser,
-      c
-    );
+    console.log('🟢 [OAuth Callback] Syncing user profile to DB...');
+    console.log('🟢 [OAuth Callback] User metadata:', JSON.stringify(data.user.user_metadata, null, 2));
+    console.log('🟢 [OAuth Callback] Is new user:', isNewUser);
+    
+    try {
+      await syncUserProfile(
+        data.user.id,
+        {
+          full_name: data.user.user_metadata?.full_name || data.user.user_metadata?.name,
+          email: data.user.email,
+          phone: data.user.user_metadata?.phone,
+          avatar_url: data.user.user_metadata?.avatar_url || data.user.user_metadata?.picture,
+          sign_in_method: 'google',
+          provider: 'google',
+        },
+        locationInfo,
+        isNewUser,
+        c
+      );
+      console.log('✅ [OAuth Callback] User profile synced successfully');
+    } catch (syncError: any) {
+      console.error('❌ [OAuth Callback] Profile sync failed:', syncError);
+      console.error('❌ [OAuth Callback] Sync error details:', JSON.stringify(syncError, null, 2));
+      // Continue even if profile sync fails - user is authenticated
+    }
 
     // Format location data for frontend
     const formattedLocation = {
@@ -367,7 +481,7 @@ export const handleOAuthCallback = async (c: Context) => {
  * POST /auth/reset-password
  * Send password reset email
  */
-export const resetPassword = async (c: Context) => {
+export const resetPassword = async (c: Context<{ Bindings: CloudflareBindings }>) => {
   try {
     const { email } = await c.req.json();
 
@@ -401,7 +515,7 @@ export const resetPassword = async (c: Context) => {
  * GET /auth/session
  * Verify and return current session
  */
-export const getSession = async (c: Context) => {
+export const getSession = async (c: Context<{ Bindings: CloudflareBindings }>) => {
   try {
     const authHeader = c.req.header('Authorization');
     

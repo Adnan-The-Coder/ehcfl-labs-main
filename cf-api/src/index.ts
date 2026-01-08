@@ -55,16 +55,25 @@ app.use("*", (c, next) => {
 
 const ALLOWED_ORIGINS = new Set([
   "http://localhost:3000",
+  "http://localhost:5173",
   "http://localhost:8080",
+  "http://127.0.0.1:5173",
   "https://ehcfl-labs-main.vercel.app",
   "https://ehcflabs-main-web.pages.dev",
+  // Add production Vercel domains (all preview and production URLs)
+  "https://ehcflabs.vercel.app",
 ]);
 
 app.use(
   "*",
   cors({
-    origin: (origin) =>
-      !origin || ALLOWED_ORIGINS.has(origin) ? origin ?? "*" : "",
+    origin: (origin) => {
+      // Allow all Vercel preview deployments
+      if (origin && (origin.includes('.vercel.app') || origin.includes('.pages.dev'))) {
+        return origin;
+      }
+      return !origin || ALLOWED_ORIGINS.has(origin) ? origin ?? "*" : "";
+    },
     allowHeaders: ["Content-Type", "Authorization", "X-Access-Token"],
     allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     credentials: true,
