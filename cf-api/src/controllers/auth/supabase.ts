@@ -281,9 +281,19 @@ export const initiateGoogleOAuth = async (c: Context<{ Bindings: CloudflareBindi
 
     const supabase = getSupabaseClient(c.env, storage);
 
-    const origin = c.req.header('origin') || c.req.header('referer')?.split('/').slice(0, 3).join('/') || '';
+    // Get origin with fallback to localhost for dev
+    let origin = c.req.header('origin') || c.req.header('referer')?.split('/').slice(0, 3).join('/') || '';
+    
+    // Fallback to localhost if no origin (for local development)
+    if (!origin) {
+      origin = 'http://localhost:8080';
+      console.warn('⚠️ [Google OAuth] No origin header, using fallback:', origin);
+    }
+    
     console.log('🔵 [Google OAuth] Origin:', origin);
-    const callbackUrl = `${origin}/auth/callback?redirectUrl=${encodeURIComponent(redirectUrl)}`;
+    
+    // Use simple callback URL - redirectUrl will be stored in localStorage
+    const callbackUrl = `${origin}/auth/callback`;
     console.log('🔵 [Google OAuth] Callback URL:', callbackUrl);
     
     const { data, error: oauthError } = await supabase.auth.signInWithOAuth({
@@ -315,12 +325,12 @@ export const initiateGoogleOAuth = async (c: Context<{ Bindings: CloudflareBindi
       
       setCookie(c, 'sb-pkce-verifier', pkceVerifier, {
         httpOnly: true,
-        secure: isSecure && !isLocalDev, // true for production HTTPS, false for local dev
-        sameSite: 'Lax',
+        secure: isSecure, // true for HTTPS (including localhost over HTTPS)
+        sameSite: isLocalDev ? 'Lax' : 'None', // None for cross-origin, Lax for local dev
         path: '/',
         maxAge: 300,
       });
-      console.log('✅ [Google OAuth] PKCE verifier stored in cookie (secure:', isSecure && !isLocalDev, 'origin:', origin, ')');
+      console.log('✅ [Google OAuth] PKCE verifier stored in cookie (secure:', isSecure, 'sameSite:', isLocalDev ? 'Lax' : 'None', 'origin:', origin, ')');
     } else {
       console.warn('⚠️ [Google OAuth] No PKCE verifier captured!');
     }

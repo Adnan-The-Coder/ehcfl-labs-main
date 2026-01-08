@@ -138,16 +138,22 @@ const SignIn: React.FC<SignInProps> = ({ isOpen, onClose, redirectUrl }) => {
       // Store redirect URL in localStorage
       const urlToStore = redirectUrl || window.location.pathname;
       localStorage.setItem('authRedirectUrl', urlToStore);
+      console.log('🔵 [Sign-in] Stored redirect URL:', urlToStore);
 
       // Call backend API to initiate Google OAuth
-      const response = await fetch(`${API_ENDPOINTS.authGoogleOAuth}?redirectUrl=${encodeURIComponent(urlToStore)}`, {
+      const apiUrl = `${API_ENDPOINTS.authGoogleOAuth}?redirectUrl=${encodeURIComponent(urlToStore)}`;
+      console.log('🔵 [Sign-in] Calling API:', apiUrl);
+      
+      const response = await fetch(apiUrl, {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
         },
+        credentials: 'include', // Enable cookies for PKCE flow
       });
 
       const result = await response.json();
+      console.log('🔵 [Sign-in] API response:', result);
 
       if (!response.ok || !result.success) {
         throw new Error(result.message || 'Failed to initiate Google OAuth');
@@ -155,6 +161,7 @@ const SignIn: React.FC<SignInProps> = ({ isOpen, onClose, redirectUrl }) => {
 
       // Redirect to Google OAuth URL
       if (result.data?.url) {
+        console.log('✅ [Sign-in] Redirecting to Google:', result.data.url.substring(0, 80) + '...');
         window.location.href = result.data.url;
       } else {
         throw new Error('OAuth URL not received');

@@ -105,10 +105,18 @@ export function useUser() {
       }
     };
 
+    // Listen for auth state changes from AuthCallback
+    const handleAuthStateChange = () => {
+      console.log('🔄 Auth state changed, rechecking session...');
+      checkSession();
+    };
+
     window.addEventListener('storage', handleStorageChange);
+    window.addEventListener('auth-state-changed', handleAuthStateChange);
 
     return () => {
       window.removeEventListener('storage', handleStorageChange);
+      window.removeEventListener('auth-state-changed', handleAuthStateChange);
     };
   }, []);
 
