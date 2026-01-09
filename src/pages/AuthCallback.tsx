@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Loader2 } from 'lucide-react';
 import { API_ENDPOINTS } from '@/config/api';
+import { syncUserProfileToDB } from '@/services/profileSync';
 
 export default function AuthCallback() {
   const navigate = useNavigate();
@@ -46,9 +47,10 @@ export default function AuthCallback() {
             console.log('✅ [AuthCallback] Session stored from implicit flow');
             
             // Decode JWT to get user info
+            let user;
             try {
               const payload = JSON.parse(atob(accessToken.split('.')[1]));
-              const user = {
+              user = {
                 id: payload.sub,
                 email: payload.email,
                 user_metadata: payload.user_metadata,
@@ -57,6 +59,18 @@ export default function AuthCallback() {
               console.log('✅ [AuthCallback] User data extracted from token');
             } catch (e) {
               console.error('❌ Failed to decode token:', e);
+              throw e;
+            }
+            
+            // Sync user profile to database
+            setMessage('Saving profile...');
+            if (user) {
+              await syncUserProfileToDB(user.id, {
+                email: user.email,
+                full_name: user.user_metadata?.full_name || user.user_metadata?.name,
+                avatar_url: user.user_metadata?.avatar_url || user.user_metadata?.picture,
+                phone: user.user_metadata?.phone,
+              });
             }
             
             // Get redirect URL and navigate
@@ -149,7 +163,17 @@ export default function AuthCallback() {
           console.log('📍 Location stored');
         }
 
-        // Clean up
+        // Sync user profile to database
+        setMessage('Saving profile...');
+        if (result.data?.user) {
+          const userData = result.data.user;
+          await syncUserProfileToDB(userData.id, {
+            email: userData.email,
+            full_name: userData.user_metadata?.full_name || userData.user_metadata?.name,
+            avatar_url: userData.user_metadata?.avatar_url || userData.user_metadata?.picture,
+            phone: userData.user_metadata?.phone,
+          });
+        }        // Clean up
         localStorage.removeItem('authRedirectUrl');
 
         const finalRedirectUrl = result.data?.redirectUrl || redirectUrl;

@@ -57,39 +57,93 @@ export const createProfile = async (c: Context) => {
       ? (typeof user_login_info === 'string' ? user_login_info : JSON.stringify(user_login_info))
       : null;
 
-    // Insert into userProfiles table
-    const result = await db.insert(userProfiles).values({
-      uuid,
-      full_name,
-      email: email.toLowerCase(),
-      avatar_url,
-      phone,
-      address,
-      city,
-      state,
-      pincode,
-      email_notifications,
-      user_login_info: userLoginInfoString,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    }).returning();
+    // Upsert: Try to insert, if uuid already exists it will be ignored and we'll update instead
+    const now = new Date().toISOString();
+    
+    // First check if profile exists
+    const existing = await db
+      .select()
+      .from(userProfiles)
+      .where(eq(userProfiles.uuid, uuid))
+      .limit(1);
 
-    return c.json({
-      success: true,
-      message: 'Profile created successfully!',
-      data: {
-        id: result[0].id,
-        name: result[0].full_name,
-        email: result[0].email,
-        phone: result[0].phone,
-        address: result[0].address,
-        city: result[0].city,
-        state: result[0].state,
-        pincode: result[0].pincode,
-        user_login_info: result[0].user_login_info,
-        createdAt: result[0].created_at,
-      }
-    });
+    let result;
+    if (existing.length > 0) {
+      // Profile exists, update it
+      console.log('📝 [createProfile] Profile exists, updating...');
+      result = await db
+        .update(userProfiles)
+        .set({
+          full_name,
+          email: email.toLowerCase(),
+          avatar_url,
+          phone: phone || null,
+          address: address || null,
+          city: city || null,
+          state: state || null,
+          pincode: pincode || null,
+          email_notifications,
+          user_login_info: userLoginInfoString,
+          updated_at: now,
+        })
+        .where(eq(userProfiles.uuid, uuid))
+        .returning();
+      
+      return c.json({
+        success: true,
+        message: 'Profile updated successfully!',
+        data: {
+          id: result[0].id,
+          name: result[0].full_name,
+          email: result[0].email,
+          phone: result[0].phone,
+          address: result[0].address,
+          city: result[0].city,
+          state: result[0].state,
+          pincode: result[0].pincode,
+          user_login_info: result[0].user_login_info,
+          createdAt: result[0].created_at,
+        }
+      });
+    } else {
+      // Profile doesn't exist, create it
+      console.log('✨ [createProfile] Creating new profile...');
+      result = await db
+        .insert(userProfiles)
+        .values({
+          uuid,
+          full_name,
+          email: email.toLowerCase(),
+          avatar_url,
+          phone: phone || null,
+          address: address || null,
+          city: city || null,
+          state: state || null,
+          pincode: pincode || null,
+          email_notifications,
+          user_login_info: userLoginInfoString,
+          created_at: now,
+          updated_at: now,
+        })
+        .returning();
+
+      return c.json({
+        success: true,
+        message: 'Profile created successfully!',
+        data: {
+          id: result[0].id,
+          name: result[0].full_name,
+          email: result[0].email,
+          phone: result[0].phone,
+          address: result[0].address,
+          city: result[0].city,
+          state: result[0].state,
+          pincode: result[0].pincode,
+          user_login_info: result[0].user_login_info,
+          createdAt: result[0].created_at,
+        }
+      });
+    }
 
   } catch (error) {
     console.error('Profile Creation error:', error);
