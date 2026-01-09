@@ -4,7 +4,7 @@ import { Calendar } from '@/components/ui/calendar';
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { getMinSelectableDate } from '@/utils/dateUtils';
-import { Clock, AlertCircle, Loader2 } from 'lucide-react';
+import { Clock, AlertCircle, Loader2, CheckCircle2 } from 'lucide-react';
 import { getTimeSlots } from '@/services/healthiansApi';
 
 interface Props {
@@ -73,6 +73,22 @@ const DateTimeStep = ({
   const [loadingSlots, setLoadingSlots] = useState(false);
   const [availableSlots, setAvailableSlots] = useState<AvailableSlot[]>([]);
   const [slotError, setSlotError] = useState('');
+  const [locationDataAvailable, setLocationDataAvailable] = useState(false);
+
+  // Verify location data exists on mount
+  useEffect(() => {
+    console.log('🔍 DateTimeStep mounted - verifying location data...');
+    const cached = getLocationFromCache();
+    
+    if (cached && cached.zoneId && cached.latitude && cached.longitude && cached.zipcode) {
+      console.log('✅ Location data verified on mount:', cached);
+      setLocationDataAvailable(true);
+    } else {
+      console.error('❌ Location data missing on DateTimeStep mount!');
+      setLocationDataAvailable(false);
+      setSlotError('Location data not available. Please go back and verify your address.');
+    }
+  }, []); // Run once on mount
 
   // ALWAYS read from localStorage (ignore props to avoid state sync issues)
   const getLocationData = () => {
@@ -237,6 +253,37 @@ const DateTimeStep = ({
         <h2 className="text-2xl font-bold mb-2">Select Date & Time</h2>
         <p className="text-muted-foreground">Choose your preferred collection date and time. Available for today + 7 days</p>
       </div>
+
+      {/* Location Verification Status */}
+      {!locationDataAvailable && (
+        <div className="flex items-start gap-3 p-4 bg-red-50 border-2 border-red-200 rounded-lg">
+          <AlertCircle className="w-6 h-6 text-red-600 mt-0.5 flex-shrink-0" />
+          <div>
+            <p className="font-semibold text-red-900">Location Data Not Found</p>
+            <p className="text-sm text-red-800 mt-1">
+              Your address verification data is missing. Please go back to the previous step and verify your address again.
+            </p>
+            <Button 
+              variant="outline" 
+              size="sm" 
+              onClick={onBack}
+              className="mt-3 border-red-300 text-red-700 hover:bg-red-100"
+            >
+              Go Back to Address
+            </Button>
+          </div>
+        </div>
+      )}
+      
+      {locationDataAvailable && (
+        <div className="flex items-start gap-2 p-3 bg-green-50 border border-green-200 rounded-lg">
+          <CheckCircle2 className="w-5 h-5 text-green-600 mt-0.5 flex-shrink-0" />
+          <div className="text-sm">
+            <p className="font-medium text-green-900">Location Verified</p>
+            <p className="text-green-700">Your address has been verified for slot availability</p>
+          </div>
+        </div>
+      )}
 
       <div className="space-y-6">
         <div>

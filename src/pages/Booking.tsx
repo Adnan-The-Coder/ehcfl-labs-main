@@ -76,6 +76,32 @@ const Booking = () => {
     paymentMethod: 'prepaid',
   });
   const [healthiansBookingResponse, setHealthiansBookingResponse] = useState<Record<string, unknown> | null>(null);
+  const [locationVerified, setLocationVerified] = useState(false);
+
+  // Restore location data from localStorage on mount (if returning to step 3+)
+  useState(() => {
+    if (currentStep >= 3) {
+      try {
+        const cached = localStorage.getItem(LOCATION_CACHE_KEY);
+        if (cached) {
+          const locationData = JSON.parse(cached);
+          if (locationData.zone_id && locationData.latitude && locationData.longitude && locationData.zipcode) {
+            console.log('🔄 Restored location data from localStorage on mount');
+            setBookingData(prev => ({
+              ...prev,
+              zone_id: locationData.zone_id,
+              latitude: locationData.latitude,
+              longitude: locationData.longitude,
+              zipcode: locationData.zipcode,
+            }));
+            setLocationVerified(true);
+          }
+        }
+      } catch (error) {
+        console.error('❌ Failed to restore location data:', error);
+      }
+    }
+  });
 
   if (items.length === 0) {
     navigate('/cart');
@@ -133,37 +159,44 @@ const Booking = () => {
             latitude: String(location.latitude),
             longitude: String(location.longitude),
             zipcode: pinCode,
+            timestamp: Date.now(), // Add timestamp for tracking
           };
 
           console.log('2️⃣ Saving to localStorage:', locationData);
-          localStorage.setItem(LOCATION_CACHE_KEY, JSON.stringify(locationData));
           
-          // Verify save IMMEDIATELY
-          const saved = localStorage.getItem(LOCATION_CACHE_KEY);
-          if (!saved) {
+          // Attempt save with retry logic
+          let saveAttempts = 0;
+          let saveSuccess = false;
+          
+          while (saveAttempts < 3 && !saveSuccess) {
+            try {
+              localStorage.setItem(LOCATION_CACHE_KEY, JSON.stringify(locationData));
+              
+              // Immediate verification
+              const saved = localStorage.getItem(LOCATION_CACHE_KEY);
+              if (saved) {
+                const parsedData = JSON.parse(saved);
+                if (parsedData.zone_id && parsedData.latitude && parsedData.longitude && parsedData.zipcode) {
+                  console.log('✅ Verified in localStorage (attempt ' + (saveAttempts + 1) + '):', saved);
+                  saveSuccess = true;
+                  break;
+                }
+              }
+            } catch (err) {
+              console.error('❌ Save attempt ' + (saveAttempts + 1) + ' failed:', err);
+            }
+            saveAttempts++;
+          }
+          
+          if (!saveSuccess) {
             toast({
               variant: 'destructive',
               title: 'Storage Error',
-              description: 'Could not save location. Please enable localStorage.',
+              description: 'Could not save location data. Please enable localStorage and try again.',
             });
             setIsSubmitting(false);
             return;
           }
-
-          // Parse and verify the saved data has all required fields
-          const parsedData = JSON.parse(saved);
-          if (!parsedData.zone_id || !parsedData.latitude || !parsedData.longitude || !parsedData.zipcode) {
-            console.error('❌ Incomplete location data saved:', parsedData);
-            toast({
-              variant: 'destructive',
-              title: 'Storage Error',
-              description: 'Location data incomplete. Please try again.',
-            });
-            setIsSubmitting(false);
-            return;
-          }
-
-          console.log('✅ Verified in localStorage:', saved);
 
           // 4. Update React state with location data
           console.log('3️⃣ Updating React state...');
@@ -174,9 +207,31 @@ const Booking = () => {
             longitude: String(location.longitude),
             zipcode: pinCode,
           }));
+          
+          // Set verification flag
+          setLocationVerified(true);
 
           // 5. Navigate to next step - DateTimeStep will read from localStorage
           console.log('4️⃣ Navigating to DateTimeStep...');
+          
+          // Final verification before navigation
+          const finalCheck = localStorage.getItem(LOCATION_CACHE_KEY);
+          if (!finalCheck) {
+            console.error('❌ Location data lost before navigation!');
+            toast({
+              variant: 'destructive',
+              title: 'Verification Failed',
+              description: 'Location data was not properly saved. Please try again.',
+            });
+            setIsSubmitting(false);
+            return;
+          }
+          
+          toast({
+            title: 'Address Verified',
+            description: 'Your location has been verified and saved successfully.',
+          });
+          
           setCurrentStep(3);
           window.scrollTo({ top: 0, behavior: 'smooth' });
           setIsSubmitting(false);
@@ -190,6 +245,14 @@ const Booking = () => {
           });
           setIsSubmitting(false);
         }
+      } else if (currentStep === 3 && !locationVerified) {
+        // Prevent access to DateTimeStep without verified location
+        toast({
+          variant: 'destructive',
+          title: 'Location Required',
+          description: 'Please complete address verification first.',
+        });
+        setCurrentStep(2);
       } else {
         // Other steps: simple navigation
         setCurrentStep(currentStep + 1);
