@@ -1,7 +1,3 @@
-/**
- * For more details on how to configure Wrangler, refer to:
- * https://developers.cloudflare.com/workers/wrangler/configuration/
- */
 {
 	"$schema": "node_modules/wrangler/config-schema.json",
 	"name": "ehcflabs-backend-cf-api",
@@ -26,6 +22,22 @@
   ],
   "env": {
     "production": {
+      "vars": {
+        "ENVIRONMENT": "production"
+      },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "ehcflabs",
+          "database_id": "f4c35cce-4630-4257-b542-e4d0804fd637",
+          "migrations_dir": "./drizzle"
+        }
+      ]
+    },
+    "staging": {
+      "vars": {
+        "ENVIRONMENT": "staging"
+      },
       "d1_databases": [
         {
           "binding": "DB",
