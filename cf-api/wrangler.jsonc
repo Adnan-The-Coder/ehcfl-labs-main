@@ -16,7 +16,7 @@
     {
       "binding": "DB",
       "database_name": "ehcflabs",
-      "database_id": "f4c35cce-4630-4257-b542-e4d0804fd637",
+      "database_id": "fc573a84-06db-49f2-aef4-769bdd78da37",
       "migrations_dir": "./drizzle"
     }
   ],
@@ -29,7 +29,7 @@
         {
           "binding": "DB",
           "database_name": "ehcflabs",
-          "database_id": "f4c35cce-4630-4257-b542-e4d0804fd637",
+          "database_id": "fc573a84-06db-49f2-aef4-769bdd78da37",
           "migrations_dir": "./drizzle"
         }
       ]
@@ -42,7 +42,7 @@
         {
           "binding": "DB",
           "database_name": "ehcflabs",
-          "database_id": "f4c35cce-4630-4257-b542-e4d0804fd637",
+          "database_id": "fc573a84-06db-49f2-aef4-769bdd78da37",
           "migrations_dir": "./drizzle"
         }
       ]
