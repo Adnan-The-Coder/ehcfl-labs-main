@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, real } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, integer, real, uniqueIndex } from "drizzle-orm/sqlite-core";
 import { desc, sql } from "drizzle-orm";
 
 
@@ -78,3 +78,38 @@ export const bookings = sqliteTable("bookings", {
   
   updated_at: text("updated_at"),
 });
+
+// Logs for inbound Healthians webhooks (raw storage + processing state)
+export const healthiansWebhookLogs = sqliteTable(
+  "healthiansWebhookLogs",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+
+    // Optional event id provided by Healthians (if any)
+    event_id: text("event_id"),
+
+    // Deterministic hash of payload for idempotency
+    event_hash: text("event_hash").notNull(),
+
+    // Event type e.g. BOOKING_CONFIRMED, REPORT_READY, etc.
+    event_type: text("event_type").notNull(),
+
+    // Booking id referenced by the event (if present)
+    booking_id: text("booking_id"),
+
+    // Raw JSON payload and headers
+    payload: text("payload").notNull(),
+    headers: text("headers").notNull(),
+
+    // Signature header value (if provided)
+    signature: text("signature"),
+
+    processed: integer("processed").notNull().default(0),
+    received_at: text("received_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    processed_at: text("processed_at"),
+  },
+  (table) => ({
+    // Ensure no duplicate processing of the same event payload
+    unique_event_hash: uniqueIndex("uniq_healthians_event_hash").on(table.event_hash),
+  })
+);
