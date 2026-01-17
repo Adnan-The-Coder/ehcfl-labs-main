@@ -1,11 +1,11 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { Context } from 'hono';
 import { createClient } from '@supabase/supabase-js';
 import { getCookie, setCookie } from 'hono/cookie';
 import { CloudflareBindings } from '../../types';
+import { getIpAndLocation } from '../../helpers/geolocation';
 
-/**
- * Initialize Supabase client with environment variables
- */
+
 const getSupabaseClient = (env: CloudflareBindings, storage?: Parameters<typeof createClient>[2]['auth']['storage']) => { 
   const supabaseUrl = env.SUPABASE_URL;
   // Prefer service role for server-side auth, but fall back to anon for local/dev if absent
@@ -25,40 +25,6 @@ const getSupabaseClient = (env: CloudflareBindings, storage?: Parameters<typeof 
   });
 };
 
-/**
- * Get IP address and geolocation data
- */
-const getIpAndLocation = async (ip: string, env: any) => {
-  try {
-    const IP_INFO_TOKEN = env.IP_INFO_TOKEN || 'db04343f368c67';
-    
-    const geoResponse = await fetch(`https://ipinfo.io/${ip}/json?token=${IP_INFO_TOKEN}`);
-    const geoData = await geoResponse.json();
-    
-    return {
-      ip,
-      city: geoData.city || 'Unknown',
-      region: geoData.region || 'Unknown',
-      country: geoData.country || 'Unknown',
-      loc: geoData.loc || '0,0',
-      org: geoData.org || 'Unknown',
-      postal: geoData.postal || 'Unknown',
-      timezone: geoData.timezone || 'Unknown'
-    };
-  } catch (error) {
-    console.error('❌ Error fetching location:', error);
-    return {
-      ip,
-      city: 'Unknown',
-      region: 'Unknown',
-      country: 'Unknown',
-      loc: '0,0',
-      org: 'Unknown',
-      postal: 'Unknown',
-      timezone: 'Unknown'
-    };
-  }
-};
 
 /**
  * Create or update user profile in the database
@@ -258,9 +224,9 @@ export const emailSignIn = async (c: Context<{ Bindings: CloudflareBindings }>) 
  */
 export const initiateGoogleOAuth = async (c: Context<{ Bindings: CloudflareBindings }>) => {
   try {
-    console.log('🔵 [Google OAuth] Initiating Google OAuth flow...');
+    console.log('Initiating Google OAuth flow...');
     const redirectUrl = c.req.query('redirectUrl') || '/';
-    console.log('🔵 [Google OAuth] Redirect URL:', redirectUrl);
+    console.log('[Google OAuth] Redirect URL:', redirectUrl);
 
     // In-memory storage to capture PKCE verifier and set it as cookie
     const tempStore: Record<string, string> = {};

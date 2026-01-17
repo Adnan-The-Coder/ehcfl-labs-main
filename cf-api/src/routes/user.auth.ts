@@ -4,7 +4,7 @@ import {
   createProfile, 
   getProfileByUUID, 
   updateProfileByUUID 
-} from '../controllers/user/auth';
+} from '../controllers/user/profile';
 import {
   emailSignIn,
   initiateGoogleOAuth,

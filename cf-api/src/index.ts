@@ -57,10 +57,8 @@ const ALLOWED_ORIGINS = new Set([
   "http://localhost:3000",
   "http://localhost:5173",
   "http://localhost:8080",
-  "http://127.0.0.1:5173",
   "https://ehcfl-labs-main.vercel.app",
   "https://ehcflabs-main-web.pages.dev",
-  // Add production Vercel domains (all preview and production URLs)
   "https://ehcflabs.vercel.app",
 ]);
 
@@ -129,20 +127,6 @@ app.notFound((c) =>
     404
   )
 );
-
-/* ------------------------- HEALTH ENDPOINTS ------------------------- */
-
-app.get("/health", (c) => {
-  const health: HealthStatus = {
-    status: "healthy",
-    timestamp: new Date().toISOString(),
-    uptime: Date.now() - startTime,
-    requestId: c.get("requestId"),
-  };
-
-  c.header("Cache-Control", "public, max-age=300");
-  return c.json(health);
-});
 
 app.get("/ready", (c) =>
   c.json(

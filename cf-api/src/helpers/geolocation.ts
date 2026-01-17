@@ -4,8 +4,6 @@ import { GeoLocation } from "../types";
 /**
  * Get geolocation from IP address using ipapi.co
  */
-
-
 export const getGeoFromIP = async (clientIp: string): Promise<GeoLocation | null> => {
   try {
     console.log('Getting geolocation from IP:', clientIp);
@@ -72,6 +70,48 @@ export const getGeoFromZipcode = async (zipcode: string): Promise<GeoLocation | 
       latitude: 20.5937,
       longitude: 78.9629,
       address: 'India (Fallback Center)',
+    };
+  }
+};
+
+
+/**
+ * Get IP address and geolocation data
+ */
+export const getIpAndLocation = async (ip: string, env: any) => {
+  try {
+    const IP_INFO_TOKEN = env.IP_INFO_TOKEN || 'db04343f368c67';
+    
+    const geoResponse = await fetch(`https://ipinfo.io/${ip}/json?token=${IP_INFO_TOKEN}`);
+    const geoData:{city:string, 
+                  region:string, 
+                  country:string, 
+                  loc:string, 
+                  postal:string,
+                  org:string, 
+                  timezone:string} = await geoResponse.json();
+    
+    return {
+      ip,
+      city: geoData.city || 'Unknown',
+      region: geoData.region || 'Unknown',
+      country: geoData.country || 'Unknown',
+      loc: geoData.loc || '0,0',
+      org: geoData.org || 'Unknown',
+      postal: geoData.postal || 'Unknown',
+      timezone: geoData.timezone || 'Unknown'
+    };
+  } catch (error) {
+    console.error('❌ Error fetching location:', error);
+    return {
+      ip,
+      city: 'Unknown',
+      region: 'Unknown',
+      country: 'Unknown',
+      loc: '0,0',
+      org: 'Unknown',
+      postal: 'Unknown',
+      timezone: 'Unknown'
     };
   }
 };

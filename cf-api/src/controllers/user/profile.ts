@@ -44,7 +44,7 @@ export const createProfile = async (c: Context) => {
 
     // Basic Validation
     if (!full_name || !email || !uuid) {
-      return c.json({ success: false, message: 'All fields are required.' }, 400);
+      return c.json({ success: false, message: 'Full Name, Email and UUID fields are required.' }, 400);
     }
 
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -70,7 +70,7 @@ export const createProfile = async (c: Context) => {
     let result;
     if (existing.length > 0) {
       // Profile exists, update it
-      console.log('📝 [createProfile] Profile exists, updating...');
+      console.log('User Profile exists, updating...');
       result = await db
         .update(userProfiles)
         .set({
@@ -106,8 +106,7 @@ export const createProfile = async (c: Context) => {
         }
       });
     } else {
-      // Profile doesn't exist, create it
-      console.log('✨ [createProfile] Creating new profile...');
+      console.log('Creating new user profile...');
       result = await db
         .insert(userProfiles)
         .values({
