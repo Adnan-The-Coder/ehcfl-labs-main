@@ -55,11 +55,9 @@ app.use("*", (c, next) => {
 
 const ALLOWED_ORIGINS = new Set([
   "http://localhost:3000",
-  "http://localhost:5173",
   "http://localhost:8080",
   "https://ehcfl-labs-main.vercel.app",
   "https://ehcflabs-main-web.pages.dev",
-  "https://ehcflabs.vercel.app",
 ]);
 
 app.use(
