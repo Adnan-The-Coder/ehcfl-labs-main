@@ -43,3 +43,66 @@ export interface GeoLocation {
   region?: string | null;
   country_name?: string | null;
 }
+
+
+// Types
+export interface UserLoginInfo {
+  last_sign_in: string;
+  sign_in_method: string;
+  provider: string;
+  sign_in_count: number;
+  ip_address: string;
+}
+
+export interface UpsertProfileData {
+  uuid: string;
+  full_name?: string;
+  email: string;
+  phone?: string;
+  avatar_url?: string;
+  address?: string;
+  city?: string;
+  state?: string;
+  pincode?: string;
+  email_notifications?: boolean;
+  user_login_info?: Partial<UserLoginInfo>;
+}
+
+
+export interface CustomStorage {
+  getItem: (key: string) => string | null;
+  setItem: (key: string, value: string) => void;
+  removeItem: (key: string) => void;
+}
+
+export interface UserData {
+  full_name?: string;
+  name?: string;
+  email?: string;
+  phone?: string;
+  avatar_url?: string;
+  picture?: string;
+  sign_in_method?: string;
+  provider?: string;
+}
+
+export interface LocationInfo {
+  ip?: string;
+  loc?: string;
+  city?: string;
+  region?: string;
+  country?: string;
+  postal?: string;
+  timezone?: string;
+}
+
+export interface FormattedLocation {
+  coordinates: string | undefined;
+  city: string | undefined;
+  region: string | undefined;
+  country: string | undefined;
+  postal: string | undefined;
+  timezone: string | undefined;
+  address: string;
+  lastUpdated: string;
+}

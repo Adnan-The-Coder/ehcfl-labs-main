@@ -3,6 +3,109 @@ import { Context } from 'hono';
 import { drizzle } from 'drizzle-orm/d1';
 import { eq, desc } from 'drizzle-orm';
 import { userProfiles } from '../../db/schema';
+import { parseUserLoginInfo } from '../../helpers/general';
+import { UpsertProfileData, UserLoginInfo } from '../../types';
+
+
+/**
+ * Centralized function to upsert user profile
+ * Used by both auth flow and direct profile creation
+ */
+export const upsertProfile = async (
+  db: any,
+  profileData: UpsertProfileData
+): Promise<{ success: boolean; data?: any; message?: string; isNew?: boolean }> => {
+  try {
+    const dbInstance = drizzle(db);
+    const now = new Date().toISOString();
+
+    // Check if profile exists
+    const existing = await dbInstance
+      .select()
+      .from(userProfiles)
+      .where(eq(userProfiles.uuid, profileData.uuid))
+      .limit(1);
+
+    const profileExists = existing.length > 0;
+
+    if (profileExists) {
+
+      let updatedLoginInfo: UserLoginInfo | undefined;
+      if (profileData.user_login_info) {
+        const existingLoginInfo = parseUserLoginInfo(existing[0].user_login_info);
+        updatedLoginInfo = {
+          last_sign_in: profileData.user_login_info.last_sign_in || now,
+          sign_in_method: profileData.user_login_info.sign_in_method || existingLoginInfo.sign_in_method || 'email',
+          provider: profileData.user_login_info.provider || existingLoginInfo.provider || 'email',
+          sign_in_count: (existingLoginInfo.sign_in_count || 0) + 1,
+          ip_address: profileData.user_login_info.ip_address || existingLoginInfo.ip_address || 'unknown',
+        };
+      }
+
+      const updateData: any = {
+        updated_at: now,
+      };
+
+      // Only update fields that are provided
+      if (profileData.full_name !== undefined) updateData.full_name = profileData.full_name;
+      if (profileData.email !== undefined) updateData.email = profileData.email.toLowerCase();
+      if (profileData.phone !== undefined) updateData.phone = profileData.phone;
+      if (profileData.avatar_url !== undefined) updateData.avatar_url = profileData.avatar_url;
+      if (profileData.address !== undefined) updateData.address = profileData.address;
+      if (profileData.city !== undefined) updateData.city = profileData.city;
+      if (profileData.state !== undefined) updateData.state = profileData.state;
+      if (profileData.pincode !== undefined) updateData.pincode = profileData.pincode;
+      if (profileData.email_notifications !== undefined) updateData.email_notifications = profileData.email_notifications;
+      if (updatedLoginInfo) updateData.user_login_info = JSON.stringify(updatedLoginInfo);
+
+      const result = await dbInstance
+        .update(userProfiles)
+        .set(updateData)
+        .where(eq(userProfiles.uuid, profileData.uuid))
+        .returning();
+
+      console.log('✅ [Profile] Updated successfully');
+      return { success: true, data: result[0], isNew: false };
+    } else {
+      // Create new profile
+
+      const newLoginInfo: UserLoginInfo = {
+        last_sign_in: profileData.user_login_info?.last_sign_in || now,
+        sign_in_method: profileData.user_login_info?.sign_in_method || 'email',
+        provider: profileData.user_login_info?.provider || 'email',
+        sign_in_count: 1,
+        ip_address: profileData.user_login_info?.ip_address || 'unknown',
+      };
+
+      const newProfile = {
+        uuid: profileData.uuid,
+        full_name: profileData.full_name || '',
+        email: profileData.email.toLowerCase(),
+        phone: profileData.phone || null,
+        avatar_url: profileData.avatar_url || 'https://avatar.iran.liara.run/public/boy?username=[8]',
+        address: profileData.address || null,
+        city: profileData.city || null,
+        state: profileData.state || null,
+        pincode: profileData.pincode || null,
+        email_notifications: (profileData.email_notifications ?? true).toString(),
+        user_login_info: JSON.stringify(newLoginInfo),
+        created_at: now,
+        updated_at: now,
+      };
+
+      const result = await dbInstance
+        .insert(userProfiles)
+        .values(newProfile)
+        .returning();
+
+      console.log('✅ [Profile] Created successfully');
+      return { success: true, data: result[0], isNew: true };
+    }
+  } catch (error) {
+    console.error('❌ [Profile] Upsert error:', error);
+    return { success: false, message: 'Failed to upsert profile' };
+  }
+};
 
 export const getAllProfiles = async (c: Context) => {
   try {
@@ -26,13 +129,12 @@ export const getAllProfiles = async (c: Context) => {
 
 export const createProfile = async (c: Context) => {
   try {
-    const db = drizzle(c.env.DB);
     const body = await c.req.json();
     const {
       full_name,
       email,
       uuid,
-      avatar_url = 'https://avatar.iran.liara.run/public/boy?username=[8]',
+      avatar_url,
       phone,
       address,
       city,
@@ -52,100 +154,52 @@ export const createProfile = async (c: Context) => {
       return c.json({ success: false, message: 'Invalid email address.' }, 400);
     }
 
-    // Serialize user_login_info if it's an object
-    const userLoginInfoString = user_login_info 
-      ? (typeof user_login_info === 'string' ? user_login_info : JSON.stringify(user_login_info))
-      : null;
-
-    // Upsert: Try to insert, if uuid already exists it will be ignored and we'll update instead
-    const now = new Date().toISOString();
-    
-    // First check if profile exists
-    const existing = await db
-      .select()
-      .from(userProfiles)
-      .where(eq(userProfiles.uuid, uuid))
-      .limit(1);
-
-    let result;
-    if (existing.length > 0) {
-      // Profile exists, update it
-      console.log('User Profile exists, updating...');
-      result = await db
-        .update(userProfiles)
-        .set({
-          full_name,
-          email: email.toLowerCase(),
-          avatar_url,
-          phone: phone || null,
-          address: address || null,
-          city: city || null,
-          state: state || null,
-          pincode: pincode || null,
-          email_notifications,
-          user_login_info: userLoginInfoString,
-          updated_at: now,
-        })
-        .where(eq(userProfiles.uuid, uuid))
-        .returning();
-      
-      return c.json({
-        success: true,
-        message: 'Profile updated successfully!',
-        data: {
-          id: result[0].id,
-          name: result[0].full_name,
-          email: result[0].email,
-          phone: result[0].phone,
-          address: result[0].address,
-          city: result[0].city,
-          state: result[0].state,
-          pincode: result[0].pincode,
-          user_login_info: result[0].user_login_info,
-          createdAt: result[0].created_at,
-        }
-      });
-    } else {
-      console.log('Creating new user profile...');
-      result = await db
-        .insert(userProfiles)
-        .values({
-          uuid,
-          full_name,
-          email: email.toLowerCase(),
-          avatar_url,
-          phone: phone || null,
-          address: address || null,
-          city: city || null,
-          state: state || null,
-          pincode: pincode || null,
-          email_notifications,
-          user_login_info: userLoginInfoString,
-          created_at: now,
-          updated_at: now,
-        })
-        .returning();
-
-      return c.json({
-        success: true,
-        message: 'Profile created successfully!',
-        data: {
-          id: result[0].id,
-          name: result[0].full_name,
-          email: result[0].email,
-          phone: result[0].phone,
-          address: result[0].address,
-          city: result[0].city,
-          state: result[0].state,
-          pincode: result[0].pincode,
-          user_login_info: result[0].user_login_info,
-          createdAt: result[0].created_at,
-        }
-      });
+    // Parse user_login_info if provided
+    let loginInfo: Partial<UserLoginInfo> | undefined;
+    if (user_login_info) {
+      loginInfo = typeof user_login_info === 'string' 
+        ? JSON.parse(user_login_info) 
+        : user_login_info;
     }
 
+    // Use centralized upsert function
+    const result = await upsertProfile(c.env.DB, {
+      uuid,
+      full_name,
+      email,
+      phone,
+      avatar_url,
+      address,
+      city,
+      state,
+      pincode,
+      email_notifications,
+      user_login_info: loginInfo,
+    });
+
+    if (!result.success) {
+      return c.json({ success: false, message: result.message || 'Failed to create/update profile' }, 500);
+    }
+
+    return c.json({
+      success: true,
+      message: result.isNew ? 'Profile created successfully!' : 'Profile updated successfully!',
+      data: {
+        id: result.data.id,
+        name: result.data.full_name,
+        email: result.data.email,
+        phone: result.data.phone,
+        address: result.data.address,
+        city: result.data.city,
+        state: result.data.state,
+        pincode: result.data.pincode,
+        user_login_info: result.data.user_login_info,
+        createdAt: result.data.created_at,
+      }
+    });
+
   } catch (error) {
-    console.error('Profile Creation error:', error);
+    console.error('❌ Profile Creation error:', error);
     return c.json({
       success: false,
       message: 'Internal server error. Please try again later.',

@@ -2,55 +2,10 @@
 import { Context } from 'hono';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { getCookie, setCookie } from 'hono/cookie';
-import { CloudflareBindings } from '../../types';
+import { CloudflareBindings, CustomStorage, FormattedLocation, LocationInfo, UserData, UserLoginInfo } from '../../types';
 import { getIpAndLocation } from '../../helpers/geolocation';
+import { upsertProfile } from '../user/profile';
 
-// Types
-interface CustomStorage {
-  getItem: (key: string) => string | null;
-  setItem: (key: string, value: string) => void;
-  removeItem: (key: string) => void;
-}
-
-interface UserData {
-  full_name?: string;
-  name?: string;
-  email?: string;
-  phone?: string;
-  avatar_url?: string;
-  picture?: string;
-  sign_in_method?: string;
-  provider?: string;
-}
-
-interface LocationInfo {
-  ip?: string;
-  loc?: string;
-  city?: string;
-  region?: string;
-  country?: string;
-  postal?: string;
-  timezone?: string;
-}
-
-interface FormattedLocation {
-  coordinates: string | undefined;
-  city: string | undefined;
-  region: string | undefined;
-  country: string | undefined;
-  postal: string | undefined;
-  timezone: string | undefined;
-  address: string;
-  lastUpdated: string;
-}
-
-interface UserLoginInfo {
-  last_sign_in: string;
-  sign_in_method: string;
-  provider: string;
-  sign_in_count: number;
-  ip_address: string;
-}
 
 /**
  * Create Supabase client with proper typing
@@ -79,22 +34,6 @@ const getSupabaseClient = (
 };
 
 /**
- * Parse user login info safely
- */
-const parseUserLoginInfo = (loginInfo: any): Partial<UserLoginInfo> => {
-  try {
-    if (!loginInfo) return {};
-    if (typeof loginInfo === 'string') {
-      return JSON.parse(loginInfo);
-    }
-    return loginInfo;
-  } catch (error) {
-    console.error('Error parsing user login info:', error);
-    return {};
-  }
-};
-
-/**
  * Format location data for frontend
  */
 const formatLocationData = (locationInfo: LocationInfo): FormattedLocation => {
@@ -116,113 +55,49 @@ const formatLocationData = (locationInfo: LocationInfo): FormattedLocation => {
 };
 
 /**
- * Create or update user profile in the database
+ * Sync user profile using centralized upsert function
  */
 const syncUserProfile = async (
   userId: string,
   userData: UserData,
   locationInfo: LocationInfo,
-  isNewUser: boolean,
   c: Context
 ): Promise<any> => {
   try {
     console.log('📝 [DB Sync] Starting profile sync for user:', userId);
-    console.log('📝 [DB Sync] Is new user:', isNewUser);
 
     const db = c.env.DB;
     if (!db) {
       throw new Error('Database not configured');
     }
 
-    const { drizzle } = await import('drizzle-orm/d1');
-    const { eq } = await import('drizzle-orm');
-    const { userProfiles } = await import('../../db/schema');
-    const dbInstance = drizzle(db);
+    const loginInfo: Partial<UserLoginInfo> = {
+      last_sign_in: new Date().toISOString(),
+      sign_in_method: userData.sign_in_method || 'email',
+      provider: userData.provider || 'email',
+      ip_address: locationInfo?.ip || 'unknown',
+    };
 
-    if (isNewUser) {
-      const newProfile = {
-        uuid: userId,
-        full_name: userData.full_name || userData.name || '',
-        email: userData.email || '',
-        phone: userData.phone || '',
-        avatar_url: userData.avatar_url || userData.picture || '',
-        user_login_info: JSON.stringify({
-          last_sign_in: new Date().toISOString(),
-          sign_in_method: userData.sign_in_method || 'email',
-          provider: userData.provider || 'email',
-          sign_in_count: 1,
-          ip_address: locationInfo?.ip || 'unknown',
-        } as UserLoginInfo),
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      };
+    // Use centralized upsert function
+    const result = await upsertProfile(db, {
+      uuid: userId,
+      full_name: userData.full_name || userData.name || '',
+      email: userData.email || '',
+      phone: userData.phone || '',
+      avatar_url: userData.avatar_url || userData.picture || '',
+      user_login_info: loginInfo,
+    });
 
-      console.log('📝 [DB Sync] Creating new profile');
-      const result = await dbInstance.insert(userProfiles).values(newProfile);
-      console.log('✅ [DB Sync] Profile created successfully');
-      return newProfile;
-    } else {
-      // Update existing profile
-      const existingProfile = await dbInstance
-        .select()
-        .from(userProfiles)
-        .where(eq(userProfiles.uuid, userId))
-        .limit(1);
-
-      const existingLoginInfo = parseUserLoginInfo(
-        existingProfile[0]?.user_login_info
-      );
-
-      const updatedLoginInfo: UserLoginInfo = {
-        last_sign_in: new Date().toISOString(),
-        sign_in_method: userData.sign_in_method || 'email',
-        provider: userData.provider || 'email',
-        sign_in_count: (existingLoginInfo?.sign_in_count || 0) + 1,
-        ip_address: locationInfo?.ip || existingLoginInfo?.ip_address || 'unknown',
-      };
-
-      const updateData = {
-        avatar_url: userData.avatar_url || userData.picture || existingProfile[0]?.avatar_url,
-        full_name: userData.full_name || userData.name || existingProfile[0]?.full_name,
-        user_login_info: JSON.stringify(updatedLoginInfo),
-        updated_at: new Date().toISOString(),
-      };
-
-      console.log('📝 [DB Sync] Updating existing profile');
-      const result = await dbInstance
-        .update(userProfiles)
-        .set(updateData)
-        .where(eq(userProfiles.uuid, userId));
-
-      console.log('✅ [DB Sync] Profile updated successfully');
-      return { ...existingProfile[0], user_login_info: JSON.stringify(updatedLoginInfo) };
+    if (!result.success) {
+      throw new Error(result.message || 'Failed to sync profile');
     }
+
+    console.log('✅ [DB Sync] Profile synced successfully');
+    return result.data;
   } catch (error) {
     console.error('❌ Error syncing user profile:', error);
     throw error;
   }
-};
-
-/**
- * Check if profile exists in database
- */
-const checkProfileExists = async (
-  userId: string,
-  c: Context
-): Promise<boolean> => {
-  const db = c.env.DB;
-  const { drizzle } = await import('drizzle-orm/d1');
-  const { eq } = await import('drizzle-orm');
-  const { userProfiles } = await import('../../db/schema');
-  const dbInstance = drizzle(db);
-
-  const existingProfile = await dbInstance
-    .select()
-    .from(userProfiles)
-    .where(eq(userProfiles.uuid, userId))
-    .limit(1);
-
-  return existingProfile.length > 0;
 };
 
 /**
@@ -265,9 +140,7 @@ export const emailSignIn = async (c: Context<{ Bindings: CloudflareBindings }>) 
     // Get location info
     const locationInfo = await getIpAndLocation(clientIp, c.env);
 
-    // Check if profile exists and sync
-    const isNewUser = !(await checkProfileExists(data.user.id, c));
-
+    // Sync user profile (handles both create and update)
     await syncUserProfile(
       data.user.id,
       {
@@ -279,7 +152,6 @@ export const emailSignIn = async (c: Context<{ Bindings: CloudflareBindings }>) 
         provider: 'email',
       },
       locationInfo,
-      isNewUser,
       c
     );
 
@@ -486,9 +358,7 @@ export const handleOAuthCallback = async (c: Context<{ Bindings: CloudflareBindi
     // Get location info
     const locationInfo = await getIpAndLocation(clientIp, c.env);
 
-    // Check if profile exists and sync
-    const isNewUser = !(await checkProfileExists(data.user.id, c));
-
+    // Sync user profile (handles both create and update)
     try {
       await syncUserProfile(
         data.user.id,
@@ -501,7 +371,6 @@ export const handleOAuthCallback = async (c: Context<{ Bindings: CloudflareBindi
           provider: 'google',
         },
         locationInfo,
-        isNewUser,
         c
       );
       console.log('✅ [OAuth Callback] Profile synced successfully');
