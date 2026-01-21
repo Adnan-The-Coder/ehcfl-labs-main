@@ -64,8 +64,6 @@ const syncUserProfile = async (
   c: Context
 ): Promise<any> => {
   try {
-    console.log('📝 [DB Sync] Starting profile sync for user:', userId);
-
     const db = c.env.DB;
     if (!db) {
       throw new Error('Database not configured');
@@ -177,15 +175,12 @@ const createPKCEStorage = (): { storage: CustomStorage; tempStore: Record<string
   
   const storage: CustomStorage = {
     getItem: (key: string) => {
-      console.log('🔵 [Storage] getItem:', key);
       return tempStore[key] ?? null;
     },
     setItem: (key: string, value: string) => {
-      console.log('🔵 [Storage] setItem:', key);
       tempStore[key] = value;
     },
     removeItem: (key: string) => {
-      console.log('🔵 [Storage] removeItem:', key);
       delete tempStore[key];
     },
   };
@@ -249,7 +244,7 @@ export const initiateGoogleOAuth = async (c: Context<{ Bindings: CloudflareBindi
     const origin = getOrigin(c);
     const callbackUrl = `${origin}/auth/callback`;
 
-    console.log('🟢 [Google OAuth] Callback URL:', callbackUrl);
+    console.log('🟢 [Google OAuth] Callback URL');
 
     // Create PKCE storage
     const { storage, tempStore } = createPKCEStorage();
@@ -301,7 +296,7 @@ export const initiateGoogleOAuth = async (c: Context<{ Bindings: CloudflareBindi
 const createStorageWithPKCE = (pkceVerifier: string): CustomStorage => ({
   getItem: (key: string) => {
     if (key === 'pkce_code_verifier' || key === 'sb-pkce-code-verifier') {
-      console.log('🟢 [Storage] Providing PKCE verifier for key:', key);
+      console.log('🟢 [Storage] Providing PKCE verifier');
       return pkceVerifier;
     }
     return null;
@@ -349,8 +344,6 @@ export const handleOAuthCallback = async (c: Context<{ Bindings: CloudflareBindi
       console.error('❌ [OAuth Callback] No user or session');
       return c.json({ success: false, message: 'Failed to establish session' }, 401);
     }
-
-    console.log('✅ [OAuth Callback] Session established for user:', data.user.id);
 
     // Clear PKCE cookie
     clearPKCECookie(c);

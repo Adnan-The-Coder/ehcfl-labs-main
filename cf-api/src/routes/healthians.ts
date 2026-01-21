@@ -8,8 +8,6 @@ import {
   createHealthiansBooking,
   getHealthiansBooking,
   cancelHealthiansBooking,
-  listFailedPaidBookings,
-  retryFailedPaidBookings,
 } from '../controllers/healthians/booking';
 import { drizzle } from 'drizzle-orm/d1';
 import { eq } from 'drizzle-orm';
@@ -81,19 +79,6 @@ healthiansRoutes.get('/booking/:bookingId', getHealthiansBooking);
  * Returns: { success, message, booking_id }
  */
 healthiansRoutes.patch('/booking/:bookingId/cancel', cancelHealthiansBooking);
-
-/**
- * GET /healthians/bookings/failed-paid
- * List failed bookings with completed payments
- */
-healthiansRoutes.get('/bookings/failed-paid', listFailedPaidBookings);
-
-/** 
- * POST /healthians/bookings/retry-failed-paid
- * Retries Healthians booking creation for all failed bookings with payment done
- * Requires Authorization: Bearer <healthians-token> (or X-Access-Token)
- */
-healthiansRoutes.post('/bookings/retry-failed-paid', retryFailedPaidBookings);
 
 /**
  * POST /healthians/webhook
