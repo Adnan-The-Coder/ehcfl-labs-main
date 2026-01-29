@@ -21,7 +21,6 @@ import { eq } from 'drizzle-orm';
 import { bookings as bookingsTable } from '../../db/schema';
 import { storeBookingInDB } from '../booking/booking';
 import crypto from 'crypto';
-import { ServerResponse } from 'http';
 
 interface CreateBookingRequest {
   // Healthians booking data
@@ -242,6 +241,22 @@ export const createHealthiansBooking = async (c: Context) => {
 
     // Build the exact payload that will be sent to Healthians
     // This ensures checksum is calculated on the same data
+    // Following strict field order and type structure for Healthians API v3
+    const normalizeCustomer = (customers: any[]) => {
+      return customers.map(cust => ({
+        age: cust.age,
+        application_number: cust.application_number || '',
+        contact_number: cust.contact_number,
+        customer_id: cust.customer_id,
+        customer_name: cust.customer_name,
+        customer_remarks: cust.customer_remarks || '',
+        dob: cust.dob || '',
+        email: cust.email || '',
+        gender: cust.gender,
+        relation: cust.relation,
+      }));
+    };
+
     const healthiansPayload = {
       address: body.address,
       altemail: body.altemail || '',
@@ -249,7 +264,7 @@ export const createHealthiansBooking = async (c: Context) => {
       billing_cust_name: body.billing_cust_name,
       cityId: body.cityId,
       client_id: body.client_id || '',
-      customer: body.customer,
+      customer: normalizeCustomer(body.customer),
       customer_calling_number: body.customer_calling_number,
       discounted_price: body.discounted_price,
       email: body.email || '',
@@ -268,82 +283,100 @@ export const createHealthiansBooking = async (c: Context) => {
       vendor_booking_id: body.vendor_booking_id,
       zipcode: body.zipcode,
       zone_id: body.zone_id,
-      ...(body.partial_paid_amount && { partial_paid_amount: body.partial_paid_amount }),
     };
+    
+    // Add partial_paid_amount if present (must be after zone_id to maintain order)
+    if (body.partial_paid_amount) {
+      (healthiansPayload as any).partial_paid_amount = body.partial_paid_amount;
+    }
 
-    // Generate checksum from the exact payload that will be sent
-    const checksum = generateChecksum(healthiansPayload, checksumKey);
+    // CRITICAL: Stringify payload 
+    const payloadString = JSON.stringify(healthiansPayload);
+    
+    // Generate checksum from the exact string that will be sent in the request body
+    const checksum = generateChecksumFromString(payloadString, checksumKey);
 
     const url = `${baseUrl}/api/${partnerName}/createBooking_v3`;
     
+    // Prepare headers
+    const headers = {
+      'Accept': 'application/json',
+      'Content-Type': 'application/json',
+      'Authorization': accessToken && accessToken.startsWith('Bearer ')
+        ? accessToken
+        : `Bearer ${accessToken}`,
+      'X-Checksum': checksum,
+    };
+    
     // Log the actual request being sent for debugging
-    console.log('📋 Request Payload:', JSON.stringify(healthiansPayload));
+    console.log('📋 Request URL:', url);
+    console.log('📋 Request Headers:', JSON.stringify(headers, null, 2));
+    console.log('📋 Request Payload:', payloadString);
     console.log('✅ Checksum Header:', checksum);
 
     const response = await fetch(url, {
       method: 'POST',
-      headers: {
-        'Accept': 'application/json',
-        'Content-Type': 'application/json',
-        'Authorization': accessToken && accessToken.startsWith('Bearer ')
-          ? accessToken
-          : `Bearer ${accessToken}`,
-        'X-Checksum': checksum,
-      },
-      body: JSON.stringify(healthiansPayload),
+      headers,
+      body: payloadString,
     });
 
 
     console.log('Healthians createBooking_v3 response status:', response.status);
     console.log("Healthians Response Received: ", response);
 
-    const db = drizzle(c.env.DB);
-    let healthiansResponse: HealthiansBookingResponse | null = null;
-    let healthiansSyncStatus: 'pending' | 'synced' | 'failed' = 'pending';
-    let healthiansBookingId: string | null = null;
-    let healthiansError: string | null = null;
-
-    // Try to process Healthians response
+    // Process Healthians response - MUST succeed to proceed
     if (!response.ok) {
       const errorData = await safeJson(response);
-      console.error('⚠️ Healthians booking creation failed:', errorData);
+      console.error('❌ Healthians booking creation failed:', errorData);
       
-      healthiansSyncStatus = 'failed';
       const apiError = (errorData as any)?.message || (errorData as any)?.code || `HTTP ${response.status} error`;
-      healthiansError = apiError;
-      healthiansResponse = errorData as HealthiansBookingResponse;
-
-      console.log('📝 Healthians API failed, storing booking locally to allow payment...');
-    } else {
-      healthiansResponse = await response.json() as HealthiansBookingResponse;
-      console.log('Healthians booking response:', {
-        success: healthiansResponse?.success || healthiansResponse?.status,
-        booking_id: healthiansResponse?.booking_id || healthiansResponse?.id,
-        message: healthiansResponse?.message,
-      });
-
-      // Check both 'success' and 'status' fields as Healthians API may return either
-      const isSuccess = healthiansResponse.success === true || healthiansResponse.status === true;
       
-      if (isSuccess) {
-        healthiansSyncStatus = 'synced';
-        healthiansBookingId = healthiansResponse.booking_id || healthiansResponse.id || null;
-        console.log('✅ Healthians booking successful:', healthiansBookingId);
-      } else {
-        healthiansSyncStatus = 'failed';
-        healthiansError = healthiansResponse?.message || 'Healthians booking creation failed';
-        console.log('⚠️ Healthians returned error:', healthiansError);
-      }
+      return c.json(
+        {
+          success: false,
+          message: 'Healthians booking failed',
+          error: apiError,
+          details: errorData,
+        },
+        response.status as any
+      );
     }
 
-    // Store booking in database regardless of Healthians API status
-    // This allows user to proceed with payment even if Healthians sync fails
-    const localBookingId = healthiansBookingId || body.vendor_booking_id;
+    const healthiansResponse = await response.json() as HealthiansBookingResponse;
+    console.log('Healthians booking response:', {
+      success: healthiansResponse?.success || healthiansResponse?.status,
+      booking_id: healthiansResponse?.booking_id || healthiansResponse?.id,
+      message: healthiansResponse?.message,
+    });
+
+    // Check both 'success' and 'status' fields as Healthians API may return either
+    const isSuccess = healthiansResponse.success === true || healthiansResponse.status === true;
     
+    if (!isSuccess) {
+      const healthiansError = healthiansResponse?.message || 'Healthians booking creation failed';
+      console.error('❌ Healthians returned error:', healthiansError);
+      
+      return c.json(
+        {
+          success: false,
+          message: 'Healthians booking failed',
+          error: healthiansError,
+          details: healthiansResponse,
+        },
+        400
+      );
+    }
+
+    // SUCCESS: Healthians booking created
+    const healthiansBookingId = healthiansResponse.booking_id || healthiansResponse.id || body.vendor_booking_id;
+    console.log('✅ Healthians booking successful:', healthiansBookingId);
+
+    // Now store in database only after Healthians success
+    const db = drizzle(c.env.DB);
     let dbRecord;
     try {
       dbRecord = await storeBookingInDB(db, {
-        booking_id: localBookingId,
+        booking_id: healthiansBookingId,
         user_uuid: body.user_uuid || 'guest',
         customers: body.customer,
         address: {
@@ -364,11 +397,11 @@ export const createHealthiansBooking = async (c: Context) => {
         payment_method: body.payment_option,
         payment_status: body.payment_option === 'prepaid' ? 'pending' : 'cod_pending',
         status: 'confirmed',
-        healthians_booking_id: healthiansBookingId || undefined,
-        healthians_sync_status: healthiansSyncStatus,
+        healthians_booking_id: healthiansBookingId,
+        healthians_sync_status: 'synced',
         healthians_sync_attempts: 1,
-        healthians_last_error: healthiansError || undefined,
-        healthians_response: healthiansResponse || undefined,
+        healthians_last_error: undefined,
+        healthians_response: healthiansResponse,
       });
 
       console.log('✅ Booking stored in local database:', {
@@ -378,30 +411,23 @@ export const createHealthiansBooking = async (c: Context) => {
       });
     } catch (dbError) {
       console.error('❌ Critical: Failed to store booking in database:', dbError);
-      // Database storage is critical - if this fails, we cannot proceed
       return c.json(
         {
           success: false,
           message: 'Failed to store booking in database',
           error: dbError instanceof Error ? dbError.message : 'Database error',
-          healthians_status: healthiansSyncStatus,
-          healthians_error: healthiansError,
         },
         500
       );
     }
 
-    // Return success response to allow payment to proceed
-    // Include sync status so frontend knows if Healthians booking succeeded
+    // Return success - user can now proceed to payment
     return c.json({
       success: true,
-      booking_id: localBookingId,
-      message: healthiansSyncStatus === 'synced' 
-        ? 'Booking created successfully' 
-        : 'Booking saved. Healthians sync will be retried later.',
-      healthians_sync_status: healthiansSyncStatus,
+      booking_id: healthiansBookingId,
+      message: 'Booking created successfully',
+      healthians_sync_status: 'synced',
       healthians_booking_id: healthiansBookingId,
-      healthians_error: healthiansError,
       database_record: {
         id: dbRecord.id,
         booking_id: dbRecord.booking_id,
@@ -410,10 +436,10 @@ export const createHealthiansBooking = async (c: Context) => {
         healthians_sync_status: dbRecord.healthians_sync_status,
         created_at: dbRecord.created_at,
       },
-      healthians_response: healthiansSyncStatus === 'synced' ? {
+      healthians_response: {
         booking_id: healthiansBookingId,
         message: healthiansResponse?.message,
-      } : undefined,
+      },
     });
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -559,77 +585,33 @@ export const cancelHealthiansBooking = async (c: Context) => {
 };
 
 /**
- * Create a deterministic JSON string with sorted keys
- * This ensures consistent checksum generation regardless of property order
- * @param obj - The object to stringify
- * @returns Sorted JSON string
- */
-function createDeterministicJson(obj: any): string {
-  if (obj === null || obj === undefined) return '';
-  if (typeof obj !== 'object') return JSON.stringify(obj);
-  
-  if (Array.isArray(obj)) {
-    return JSON.stringify(obj.map(item => createDeterministicJsonObject(item)));
-  }
-  
-  return JSON.stringify(createDeterministicJsonObject(obj));
-}
-
-function createDeterministicJsonObject(obj: any): any {
-  if (obj === null || obj === undefined || typeof obj !== 'object') {
-    return obj;
-  }
-  
-  if (Array.isArray(obj)) {
-    return obj.map(item => createDeterministicJsonObject(item));
-  }
-  
-  const keys = Object.keys(obj).sort();
-  const sorted: Record<string, any> = {};
-  
-  for (const key of keys) {
-    sorted[key] = createDeterministicJsonObject(obj[key]);
-  }
-  
-  return sorted;
-}
-
-/**
- * Generate a checksum using HMAC-SHA256 algorithm
- * Calculates checksum on the exact payload that will be sent to Healthians API
- * Properly handles key encoding and data formatting
- * @param payload - The exact payload object being sent to Healthians
+ * Generate a checksum using HMAC-SHA256 algorithm from a JSON string
+ * Matches Healthians documentation exactly: https://partners.healthians.com/#/sample_checksum_code?sha256
+ * @param dataString - The exact JSON string being sent in the request body
  * @param key - The secret key used for generating the checksum
  * @returns The generated checksum in hex format
  */
-function generateChecksum(payload: any, key: string): string {
-  // Create deterministic JSON string with sorted keys for consistent hashing
-  const dataString = createDeterministicJson(payload);
-
+function generateChecksumFromString(dataString: string, key: string): string {
   console.log('🔐 Checksum Input Data:', dataString);
+  console.log('🔐 Data String Length:', dataString.length);
+  console.log('🔐 First 100 chars:', dataString.substring(0, 100));
+  console.log('🔐 Last 100 chars:', dataString.substring(dataString.length - 100));
   console.log('🔐 Key Type:', typeof key);
   console.log('🔐 Key Length:', key.length);
   console.log('🔐 Key Value (first 10 chars):', key.substring(0, 10));
+  console.log('🔐 Key Value (last 4 chars):', key.substring(key.length - 4));
   
-  // Ensure key is properly encoded as UTF-8
-  // crypto.createHmac expects key as string or buffer, both work with utf-8
   const hmac = crypto.createHmac('sha256', key);
-  
-  // Update with data (also UTF-8 encoded by default)
-  hmac.update(dataString, 'utf8');
-  
-  // Get hex digest
+  hmac.update(dataString); 
   const checksumHex = hmac.digest('hex');
   
   console.log('🔐 HMAC Algorithm: SHA256');
-  console.log('🔐 Data Encoding: UTF-8');
-  console.log('🔐 Key Encoding: UTF-8');
-  console.log('🔐 Output Encoding: Hex');
   console.log('🔐 Generated Checksum:', checksumHex);
   console.log('🔐 Checksum Length:', checksumHex.length);
   
   return checksumHex;
 }
+
 
 async function safeJson(resp: Response): Promise<unknown | undefined> {
   try {
