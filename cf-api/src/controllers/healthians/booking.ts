@@ -23,47 +23,47 @@ import { storeBookingInDB } from '../booking/booking';
 import crypto from 'crypto';
 
 interface CreateBookingRequest {
-  // Healthians booking data
+  // Healthians booking data - EXACT ORDER as per API documentation
+  address: string;
+  altemail?: string;
+  altmobile?: string;
+  billing_cust_name: string;
+  cityId: number;
+  client_id?: string;
   customer: Array<{
+    age: number;
+    application_number?: string;
+    contact_number: string;
     customer_id: string;
     customer_name: string;
-    relation: string;
-    age: number;
-    dob: string;
-    gender: string;
-    contact_number: string;
-    email?: string;
-    application_number?: string;
     customer_remarks?: string;
+    dob?: string;
+    email?: string;
+    gender: string;
+    relation: string;
   }>;
-  slot: {
-    slot_id: string;
-  };
+  customer_calling_number: string;
+  discounted_price: number;
+  email?: string;
+  gender: string;
+  hard_copy?: number;
+  landmark?: string;
+  latitude: string;
+  longitude: string;
+  mobile: string;
   package: Array<{
     deal_id: string[];
   }>;
-  customer_calling_number: string;
-  billing_cust_name: string;
-  gender: string;
-  mobile: string;
-  email?: string;
-  state: number;
-  cityId: number;
-  sub_locality: string;
-  latitude: string;
-  longitude: string;
-  address: string;
-  zipcode: string;
-  landmark?: string;
-  altmobile?: string;
-  altemail?: string;
-  hard_copy?: number;
-  vendor_booking_id: string;
-  vendor_billing_user_id: string;
   payment_option: 'prepaid' | 'cod';
-  discounted_price: number;
+  slot: {
+    slot_id: string;
+  };
+  state: number;
+  sub_locality: string;
+  vendor_billing_user_id: string;
+  vendor_booking_id: string;
+  zipcode: string;
   zone_id: number;
-  client_id?: string;
   partial_paid_amount?: number;
   
   // Our DB fields
@@ -106,11 +106,14 @@ interface BookingResponse {
  */
 export const createHealthiansBooking = async (c: Context) => {
   try {
-    const body: CreateBookingRequest = await c.req.json().catch(() => ({}));
+    // Get the raw body first to preserve exact stringification for checksum
+    const rawBody = await c.req.text();
+    const body: CreateBookingRequest = rawBody ? JSON.parse(rawBody) : {};
 
     const baseUrl = c.env.HEALTHIANS_BASE_URL as string;
     const partnerName = c.env.HEALTHIANS_PARTNER_NAME as string;
-    const accessToken = body.access_token || c.req.header('X-Access-Token');
+    const authHeader = c.req.header('Authorization') || '';
+    const accessToken = authHeader.startsWith('Bearer ') ? authHeader.substring(7) : authHeader;
     const checksumKey = c.env.HEALTHIANS_CHECKSUM_KEY as string | undefined;
 
     // Validate checksum key
@@ -210,7 +213,8 @@ export const createHealthiansBooking = async (c: Context) => {
     }
 
     // Validate address fields
-    if (!body.zipcode || !/^\d{6}$/.test(body.zipcode)) {
+    const zipcodeStr = String(body.zipcode);
+    if (!zipcodeStr || !/^\d{6}$/.test(zipcodeStr)) {
       return c.json(
         {
           success: false,
@@ -239,59 +243,10 @@ export const createHealthiansBooking = async (c: Context) => {
       checksum_configured: true,
     });
 
-    // Build the exact payload that will be sent to Healthians
-    // This ensures checksum is calculated on the same data
-    // Following strict field order and type structure for Healthians API v3
-    const normalizeCustomer = (customers: any[]) => {
-      return customers.map(cust => ({
-        age: cust.age,
-        application_number: cust.application_number || '',
-        contact_number: cust.contact_number,
-        customer_id: cust.customer_id,
-        customer_name: cust.customer_name,
-        customer_remarks: cust.customer_remarks || '',
-        dob: cust.dob || '',
-        email: cust.email || '',
-        gender: cust.gender,
-        relation: cust.relation,
-      }));
-    };
-
-    const healthiansPayload = {
-      address: body.address,
-      altemail: body.altemail || '',
-      altmobile: body.altmobile || '',
-      billing_cust_name: body.billing_cust_name,
-      cityId: body.cityId,
-      client_id: body.client_id || '',
-      customer: normalizeCustomer(body.customer),
-      customer_calling_number: body.customer_calling_number,
-      discounted_price: body.discounted_price,
-      email: body.email || '',
-      gender: body.gender,
-      hard_copy: body.hard_copy ?? 0,
-      landmark: body.landmark || '',
-      latitude: body.latitude,
-      longitude: body.longitude,
-      mobile: body.mobile,
-      package: body.package,
-      payment_option: body.payment_option,
-      slot: body.slot,
-      state: body.state,
-      sub_locality: body.sub_locality,
-      vendor_billing_user_id: body.vendor_billing_user_id,
-      vendor_booking_id: body.vendor_booking_id,
-      zipcode: body.zipcode,
-      zone_id: body.zone_id,
-    };
-    
-    // Add partial_paid_amount if present (must be after zone_id to maintain order)
-    if (body.partial_paid_amount) {
-      (healthiansPayload as any).partial_paid_amount = body.partial_paid_amount;
-    }
-
-    // CRITICAL: Stringify payload 
-    const payloadString = JSON.stringify(healthiansPayload);
+    // CRITICAL: Use the exact stringified payload from frontend
+    // This ensures checksum is calculated on the same data that was sent
+    // DO NOT rebuild or re-stringify - use rawBody exactly as received
+    const payloadString = rawBody;
     
     // Generate checksum from the exact string that will be sent in the request body
     const checksum = generateChecksumFromString(payloadString, checksumKey);
@@ -311,7 +266,8 @@ export const createHealthiansBooking = async (c: Context) => {
     // Log the actual request being sent for debugging
     console.log('📋 Request URL:', url);
     console.log('📋 Request Headers:', JSON.stringify(headers, null, 2));
-    console.log('📋 Request Payload:', payloadString);
+    console.log('📋 Request Payload (from frontend):', payloadString);
+    console.log('📋 Payload Length:', payloadString.length);
     console.log('✅ Checksum Header:', checksum);
 
     const response = await fetch(url, {

@@ -422,10 +422,17 @@ export async function createHealthiansBooking(bookingData: Record<string, unknow
 
     const accessToken = await getAccessToken();
 
-    const payload = {
-      ...bookingData,
-      access_token: accessToken,
-    };
+    // Remove internal fields that should NOT be sent to Healthians API
+    // Only send fields that Healthians expects
+    const { user_uuid, access_token, ...cleanPayload } = bookingData as any;
+
+    // Stringify payload exactly once - send to backend for checksum calculation
+    // Use the clean payload without internal fields
+    const payloadString = JSON.stringify(cleanPayload);
+
+    console.log('📤 Sending booking request to:', API_ENDPOINTS.healthiansBooking);
+    console.log('🔐 Authorization: Bearer [token]');
+    console.log('📋 Payload keys:', Object.keys(cleanPayload).sort().join(', '));
 
     const response = await fetch(API_ENDPOINTS.healthiansBooking, {
       method: 'POST',
@@ -434,13 +441,17 @@ export async function createHealthiansBooking(bookingData: Record<string, unknow
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${accessToken}`,
       },
-      body: JSON.stringify(payload),
+      body: payloadString,
     });
 
     if (!response.ok) {
       const errorData = await response.json();
-      console.error('❌ Healthians booking creation failed:', errorData);
-      throw new Error(errorData.message || 'Failed to create booking');
+      console.error('❌ Healthians booking creation failed:', {
+        status: response.status,
+        statusText: response.statusText,
+        error: errorData,
+      });
+      throw new Error(errorData.message || errorData.error || `HTTP ${response.status}: Failed to create booking`);
     }
 
     const data = await response.json();

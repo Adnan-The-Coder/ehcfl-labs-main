@@ -355,50 +355,48 @@ const Booking = () => {
       };
       
       const healthiansPayload = {
+        address: bookingData.address?.line1 || 'Address',
+        altemail: '',
+        altmobile: '',
+        billing_cust_name: primaryCustomer.name.toUpperCase(),
+        cityId: 23,
+        client_id: '',
         customer: bookingData.customers.map((cust, idx) => ({
+          age: parseInt(cust.age),
+          application_number: `APP-${Date.now()}`,
+          contact_number: cust.phone,
           customer_id: `CUST-${userUuid.substring(0, 12)}-${idx}`,
           customer_name: cust.name.toUpperCase(),
-          relation: idx === 0 ? 'self' : 'family',
-          age: parseInt(cust.age),
-          dob: cust.email || '', // Using email as placeholder; adjust if you have DOB field
-          gender: mapGender(cust.gender),
-          contact_number: cust.phone,
-          email: cust.email,
-          application_number: `APP-${Date.now()}`,
           customer_remarks: '',
+          dob: '',
+          email: cust.email || '',
+          gender: mapGender(cust.gender),
+          relation: idx === 0 ? 'self' : 'family',
         })),
-        slot: {
-          slot_id: slotId,
-        },
+        customer_calling_number: primaryCustomer.phone,
+        discounted_price: Math.round(discountedPrice),
+        email: primaryCustomer.email || '',
+        gender: mapGender(primaryCustomer.gender),
+        hard_copy: 0,
+        landmark: bookingData.address?.landmark || '',
+        latitude: String(bookingData.latitude || locationData?.latitude || '28.5088974'),
+        longitude: String(bookingData.longitude || locationData?.longitude || '77.0750786'),
+        mobile: primaryCustomer.phone,
         package: [
           {
             deal_id: items.map(item => item.id),
           },
         ],
-        customer_calling_number: primaryCustomer.phone,
-        billing_cust_name: primaryCustomer.name.toUpperCase(),
-        gender: mapGender(primaryCustomer.gender),
-        mobile: primaryCustomer.phone,
-        email: primaryCustomer.email,
-        state: 26, // Default to Haryana (adjust as needed)
-        cityId: 23, // Default to Gurgaon (adjust as needed)
-        sub_locality: `${bookingData.address?.line1}, ${bookingData.address?.locality}`,
-        latitude: bookingData.latitude || locationData?.latitude || String(28.5088974), // Use cached or default Gurgaon coords
-        longitude: bookingData.longitude || locationData?.longitude || String(77.0750786),
-        address: bookingData.address?.line1 || 'Address',
-        zipcode: bookingData.zipcode || bookingData.address?.pinCode || pincode,
-        landmark: bookingData.address?.landmark,
-        altmobile: '',
-        altemail: '',
-        hard_copy: 0,
-        vendor_booking_id: `VB-${userUuid.substring(0, 8)}-${Date.now()}`,
-        vendor_billing_user_id: `CUST-${userUuid.substring(0, 12)}-0`,
         payment_option: bookingData.paymentMethod === 'prepaid' || bookingData.paymentMethod === 'online' ? 'prepaid' : 'cod',
-        discounted_price: Math.round(discountedPrice),
+        slot: {
+          slot_id: slotId,
+        },
+        state: 26,
+        sub_locality: `${bookingData.address?.line1}, ${bookingData.address?.locality}`,
+        vendor_billing_user_id: `CUST-${userUuid.substring(0, 12)}-0`,
+        vendor_booking_id: `VB-${userUuid.substring(0, 8)}-${Date.now()}`,
+        zipcode: String(bookingData.zipcode || bookingData.address?.pinCode || pincode),
         zone_id: parseInt(zoneId),
-        client_id: '',
-        user_uuid: userUuid,
-        access_token: await getAccessToken(),
       };
 
       // Create booking in Healthians
