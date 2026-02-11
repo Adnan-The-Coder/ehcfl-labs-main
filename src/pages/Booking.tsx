@@ -298,28 +298,20 @@ const Booking = () => {
         navigate('/cart');
         return;
       }
+      
       const primaryCustomer = bookingData.customers[0];
       
-      // Try to get zone_id from state first, then fallback to localStorage
+      // Get zone_id from state or localStorage
       let zoneId = bookingData.zone_id;
       let locationData = null;
       
       if (!zoneId) {
-        // Fallback to localStorage if state is empty
         const cachedLocation = localStorage.getItem(LOCATION_CACHE_KEY);
         if (cachedLocation) {
           try {
             locationData = JSON.parse(cachedLocation);
             zoneId = locationData.zone_id;
             console.log('✅ Retrieved zone_id from localStorage:', zoneId);
-            // Update state with cached location data
-            setBookingData(prev => ({
-              ...prev,
-              zone_id: zoneId,
-              latitude: locationData.latitude,
-              longitude: locationData.longitude,
-              zipcode: locationData.zipcode,
-            }));
           } catch (error) {
             console.error('❌ Failed to parse cached location:', error);
           }
@@ -337,28 +329,35 @@ const Booking = () => {
       }
 
       console.log('✅ Using verified zone_id:', zoneId);
-      console.log('✅ Booking Data:', { zone_id: zoneId, latitude: bookingData.latitude || locationData?.latitude, longitude: bookingData.longitude || locationData?.longitude, zipcode: bookingData.zipcode || bookingData.address?.pinCode });
       
-      // Prepare Healthians booking payload
+      // Calculate final price
       const discountedPrice = appliedCoupon ? totalPrice - appliedCoupon.discount : totalPrice;
       
-      // Parse slot_id from selected time slot (format: "HH:MM-HH:MM|stm_id")
+      // Parse slot_id from selected time slot (format: "HH:MM-HH:MM|slot_id")
       const slotParts = bookingData.timeSlot.split('|');
       const slotId = slotParts[1] || slotParts[0];
       
-      // Helper function to map gender to single character
-      const mapGender = (gender: string): string => {
-        const g = gender.toLowerCase().trim();
-        if (g === 'male' || g === 'm') return 'M';
-        if (g === 'female' || g === 'f') return 'F';
-        return 'O'; // Other
-      };
-      
+      // Get location coordinates
+      const latitude = bookingData.latitude || locationData?.latitude;
+      const longitude = bookingData.longitude || locationData?.longitude;
+      const zipcode = bookingData.zipcode || bookingData.address?.pinCode;
+
+      if (!latitude || !longitude || !zipcode) {
+        toast({
+          variant: 'destructive',
+          title: 'Location Data Missing',
+          description: 'Please go back and verify your address.',
+        });
+        setIsSubmitting(false);
+        return;
+      }
+
+      // Construct Healthians payload - EXACT structure as working payload
       const healthiansPayload = {
-        address: bookingData.address?.line1 || 'Address',
+        address: bookingData.address?.line1 || '',
         altemail: '',
         altmobile: '',
-        billing_cust_name: primaryCustomer.name.toUpperCase(),
+        billing_cust_name: primaryCustomer.name,
         cityId: 23,
         client_id: '',
         customer: bookingData.customers.map((cust, idx) => ({
@@ -366,38 +365,79 @@ const Booking = () => {
           application_number: `APP-${Date.now()}`,
           contact_number: cust.phone,
           customer_id: `CUST-${userUuid.substring(0, 12)}-${idx}`,
-          customer_name: cust.name.toUpperCase(),
+          customer_name: cust.name,
           customer_remarks: '',
           dob: '',
           email: cust.email || '',
-          gender: mapGender(cust.gender),
+          gender: cust.gender === 'male' ? 'M' : cust.gender === 'female' ? 'F' : 'O',
           relation: idx === 0 ? 'self' : 'family',
         })),
         customer_calling_number: primaryCustomer.phone,
         discounted_price: Math.round(discountedPrice),
         email: primaryCustomer.email || '',
-        gender: mapGender(primaryCustomer.gender),
+        gender: primaryCustomer.gender === 'male' ? 'M' : primaryCustomer.gender === 'female' ? 'F' : 'O',
         hard_copy: 0,
         landmark: bookingData.address?.landmark || '',
-        latitude: String(bookingData.latitude || locationData?.latitude || '28.5088974'),
-        longitude: String(bookingData.longitude || locationData?.longitude || '77.0750786'),
+        latitude: latitude,
+        longitude: longitude,
         mobile: primaryCustomer.phone,
-        package: [
-          {
-            deal_id: items.map(item => item.id),
-          },
-        ],
+        package: [{
+          deal_id: items.map(item => item.id),
+        }],
         payment_option: bookingData.paymentMethod === 'prepaid' || bookingData.paymentMethod === 'online' ? 'prepaid' : 'cod',
         slot: {
           slot_id: slotId,
         },
         state: 26,
-        sub_locality: `${bookingData.address?.line1}, ${bookingData.address?.locality}`,
+        sub_locality: bookingData.address?.locality || '',
         vendor_billing_user_id: `CUST-${userUuid.substring(0, 12)}-0`,
         vendor_booking_id: `VB-${userUuid.substring(0, 8)}-${Date.now()}`,
-        zipcode: String(bookingData.zipcode || bookingData.address?.pinCode || pincode),
+        zipcode: zipcode,
         zone_id: parseInt(zoneId),
+        user_uuid: userUuid, // For backend DB storage only
       };
+
+      // COMPREHENSIVE DEBUG LOGGING
+      console.log('═══════════════════════════════════════════════════════');
+      console.log('🔍 PAYLOAD DEBUG - BEFORE SENDING TO BACKEND');
+      console.log('═══════════════════════════════════════════════════════');
+      console.log('📦 Full Payload:', healthiansPayload);
+      console.log('');
+      console.log('🔢 TYPE VALIDATION:');
+      console.log('  zone_id:', healthiansPayload.zone_id, '| type:', typeof healthiansPayload.zone_id);
+      console.log('  cityId:', healthiansPayload.cityId, '| type:', typeof healthiansPayload.cityId);
+      console.log('  state:', healthiansPayload.state, '| type:', typeof healthiansPayload.state);
+      console.log('  discounted_price:', healthiansPayload.discounted_price, '| type:', typeof healthiansPayload.discounted_price);
+      console.log('  hard_copy:', healthiansPayload.hard_copy, '| type:', typeof healthiansPayload.hard_copy);
+      console.log('  customer[0].age:', healthiansPayload.customer[0].age, '| type:', typeof healthiansPayload.customer[0].age);
+      console.log('');
+      console.log('📍 LOCATION DATA:');
+      console.log('  latitude:', healthiansPayload.latitude, '| type:', typeof healthiansPayload.latitude);
+      console.log('  longitude:', healthiansPayload.longitude, '| type:', typeof healthiansPayload.longitude);
+      console.log('  zipcode:', healthiansPayload.zipcode, '| type:', typeof healthiansPayload.zipcode);
+      console.log('');
+      console.log('👤 CUSTOMER DATA:');
+      console.log('  billing_cust_name:', healthiansPayload.billing_cust_name);
+      console.log('  customer_calling_number:', healthiansPayload.customer_calling_number);
+      console.log('  gender:', healthiansPayload.gender);
+      console.log('  customer[0].customer_name:', healthiansPayload.customer[0].customer_name);
+      console.log('  customer[0].gender:', healthiansPayload.customer[0].gender);
+      console.log('');
+      console.log('📦 PACKAGE DATA:');
+      console.log('  package:', healthiansPayload.package);
+      console.log('  package is array:', Array.isArray(healthiansPayload.package));
+      console.log('  package[0].deal_id is array:', Array.isArray(healthiansPayload.package[0].deal_id));
+      console.log('');
+      console.log('⏰ SLOT DATA:');
+      console.log('  slot:', healthiansPayload.slot);
+      console.log('  slot.slot_id:', healthiansPayload.slot.slot_id, '| type:', typeof healthiansPayload.slot.slot_id);
+      console.log('');
+      console.log('📄 STRINGIFIED PAYLOAD:');
+      const stringified = JSON.stringify(healthiansPayload);
+      console.log('  Length:', stringified.length);
+      console.log('  First 200 chars:', stringified.substring(0, 200));
+      console.log('  Last 200 chars:', stringified.substring(stringified.length - 200));
+      console.log('═══════════════════════════════════════════════════════');
 
       // Create booking in Healthians
       const healthiansResult = await createHealthiansBooking(healthiansPayload);

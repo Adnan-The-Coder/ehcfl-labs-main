@@ -126,7 +126,7 @@ export async function getPackages(pincode?: string, search?: string) {
 export async function checkServiceability(pincode: string, isPpmcBooking: number = 0) {
   try {
     const cleanPincode = (pincode || '').trim();
-    
+
     if (!cleanPincode || cleanPincode.length === 0) {
       throw new Error('Valid pincode is required');
     }
@@ -162,7 +162,7 @@ export async function checkServiceability(pincode: string, isPpmcBooking: number
 
     const latitude = String(parseFloat(geoData[0].lat));
     const longitude = String(parseFloat(geoData[0].lon));
-    
+
     if (!latitude || !longitude || latitude === 'NaN' || longitude === 'NaN') {
       throw new Error('Invalid coordinates retrieved from geolocation service');
     }
@@ -248,7 +248,7 @@ export async function checkServiceability(pincode: string, isPpmcBooking: number
       pincode,
       stack: error instanceof Error ? error.stack : undefined,
     });
-    
+
     return {
       success: false,
       isServiceable: false,
@@ -389,7 +389,7 @@ export async function getTimeSlots(
       parameters: { slotDate, zoneId, zipcode },
       stack: error instanceof Error ? error.stack : undefined,
     });
-    
+
     return {
       success: false,
       status: false,
@@ -406,33 +406,41 @@ export async function getTimeSlots(
  */
 export async function createHealthiansBooking(bookingData: Record<string, unknown>) {
   try {
-    const vendorBookingId = bookingData.vendor_booking_id as unknown;
-    const customers = bookingData.customer as unknown;
-    const packages = bookingData.package as unknown;
-    
-    console.log('📝 Creating Healthians booking via cf-api:', {
-      vendor_booking_id: vendorBookingId,
-      customers: Array.isArray(customers) ? customers.length : 0,
-      packages: Array.isArray(packages) ? packages.length : 0,
-    });
+    console.log('📝 Creating Healthians booking via cf-api');
 
-    if (!bookingData.vendor_booking_id || !bookingData.customer || !bookingData.package) {
-      throw new Error('Missing required booking fields');
+    // Validate required fields before sending
+    if (!bookingData.vendor_booking_id) {
+      throw new Error('vendor_booking_id is required');
+    }
+
+    if (!bookingData.customer || !Array.isArray(bookingData.customer) || bookingData.customer.length === 0) {
+      throw new Error('At least one customer is required');
+    }
+
+    if (!bookingData.package || !Array.isArray(bookingData.package) || bookingData.package.length === 0) {
+      throw new Error('At least one package is required');
     }
 
     const accessToken = await getAccessToken();
 
-    // Remove internal fields that should NOT be sent to Healthians API
-    // Only send fields that Healthians expects
-    const { user_uuid, access_token, ...cleanPayload } = bookingData as any;
-
-    // Stringify payload exactly once - send to backend for checksum calculation
-    // Use the clean payload without internal fields
-    const payloadString = JSON.stringify(cleanPayload);
-
     console.log('📤 Sending booking request to:', API_ENDPOINTS.healthiansBooking);
-    console.log('🔐 Authorization: Bearer [token]');
-    console.log('📋 Payload keys:', Object.keys(cleanPayload).sort().join(', '));
+    console.log('🔍 SERVICE LAYER - Payload structure:', {
+      vendor_booking_id: bookingData.vendor_booking_id,
+      customers: Array.isArray(bookingData.customer) ? bookingData.customer.length : 0,
+      packages: Array.isArray(bookingData.package) ? bookingData.package.length : 0,
+      zone_id: bookingData.zone_id,
+      zone_id_type: typeof bookingData.zone_id,
+      cityId: bookingData.cityId,
+      cityId_type: typeof bookingData.cityId,
+      state: bookingData.state,
+      state_type: typeof bookingData.state,
+      customer_age: bookingData.customer?.[0]?.age,
+      customer_age_type: typeof bookingData.customer?.[0]?.age,
+    });
+
+    const stringifiedPayload = JSON.stringify(bookingData);
+    console.log('🔍 STRINGIFIED LENGTH:', stringifiedPayload.length);
+    console.log('🔍 STRINGIFIED SAMPLE (first 300):', stringifiedPayload.substring(0, 300));
 
     const response = await fetch(API_ENDPOINTS.healthiansBooking, {
       method: 'POST',
@@ -441,7 +449,7 @@ export async function createHealthiansBooking(bookingData: Record<string, unknow
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${accessToken}`,
       },
-      body: payloadString,
+      body: JSON.stringify(bookingData),
     });
 
     if (!response.ok) {
@@ -563,7 +571,7 @@ export async function cancelHealthiansBooking(bookingId: string) {
  */
 export function subscribeToBookingUpdates(bookingId: string, callback: (status: Record<string, unknown>) => void) {
   console.log('📡 Real-time booking updates not yet implemented');
-  
+
   const unsubscribe = () => {
     console.log('Unsubscribed from booking updates');
   };
@@ -607,7 +615,7 @@ export async function getUserBookings() {
 export async function getBookingStatusHistory(bookingId: string) {
   try {
     console.log('📊 Fetching booking status history:', bookingId);
-    
+
     // Temporary mock implementation
     return [
       { status: 'pending', timestamp: new Date(), message: 'Booking created' },

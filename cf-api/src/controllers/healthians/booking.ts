@@ -65,7 +65,7 @@ interface CreateBookingRequest {
   zipcode: string;
   zone_id: number;
   partial_paid_amount?: number;
-  
+
   // Our DB fields
   user_uuid: string;
   access_token: string;
@@ -106,9 +106,8 @@ interface BookingResponse {
  */
 export const createHealthiansBooking = async (c: Context) => {
   try {
-    // Get the raw body first to preserve exact stringification for checksum
-    const rawBody = await c.req.text();
-    const body: CreateBookingRequest = rawBody ? JSON.parse(rawBody) : {};
+    // Parse the request body
+    const body: CreateBookingRequest = await c.req.json();
 
     const baseUrl = c.env.HEALTHIANS_BASE_URL as string;
     const partnerName = c.env.HEALTHIANS_PARTNER_NAME as string;
@@ -127,6 +126,30 @@ export const createHealthiansBooking = async (c: Context) => {
       );
     }
 
+    // Validate configuration
+    if (!baseUrl || !partnerName) {
+      return c.json(
+        {
+          success: false,
+          message: 'Healthians configuration not found',
+        },
+        500
+      );
+    }
+
+    if (!accessToken) {
+      return c.json(
+        {
+          success: false,
+          message: 'Access token is required',
+        },
+        400
+      );
+    }
+
+    // Extract user_uuid for DB storage (not sent to Healthians)
+    const userUuid = body.user_uuid || 'guest';
+
     // Validate required fields
     if (!body.vendor_booking_id || !body.customer_calling_number || !body.mobile) {
       return c.json(
@@ -135,26 +158,6 @@ export const createHealthiansBooking = async (c: Context) => {
           message: 'Missing required fields: vendor_booking_id, customer_calling_number, mobile',
         },
         400
-      );
-    }
-
-    if (!accessToken) {
-      return c.json(
-        {
-          success: false, 
-          message: 'Access token is required',
-        },
-        400
-      );
-    }
-
-    if (!baseUrl || !partnerName) {
-      return c.json(
-        {
-          success: false,
-          message: 'Healthians configuration not found',
-        },
-        500
       );
     }
 
@@ -169,6 +172,37 @@ export const createHealthiansBooking = async (c: Context) => {
       );
     }
 
+    // Validate each customer has required fields and correct types
+    for (const customer of body.customer) {
+      if (typeof customer.age !== 'number') {
+        return c.json(
+          {
+            success: false,
+            message: 'Customer age must be a number',
+          },
+          400
+        );
+      }
+      if (!customer.customer_name || typeof customer.customer_name !== 'string') {
+        return c.json(
+          {
+            success: false,
+            message: 'Customer name is required and must be a string',
+          },
+          400
+        );
+      }
+      if (!customer.gender || typeof customer.gender !== 'string') {
+        return c.json(
+          {
+            success: false,
+            message: 'Customer gender is required',
+          },
+          400
+        );
+      }
+    }
+
     // Validate packages array
     if (!Array.isArray(body.package) || body.package.length === 0) {
       return c.json(
@@ -180,79 +214,163 @@ export const createHealthiansBooking = async (c: Context) => {
       );
     }
 
-    // Validate required numeric fields
-    if (!body.zone_id || typeof body.zone_id !== 'number') {
+    // Validate required numeric fields with exact type checking
+    if (typeof body.zone_id !== 'number') {
       return c.json(
         {
           success: false,
-          message: 'Valid zone_id is required',
+          message: 'zone_id must be a number',
         },
         400
       );
     }
 
-    if (!body.discounted_price || typeof body.discounted_price !== 'number' || body.discounted_price <= 0) {
+    if (typeof body.cityId !== 'number') {
       return c.json(
         {
           success: false,
-          message: 'Valid discounted_price is required',
+          message: 'cityId must be a number',
+        },
+        400
+      );
+    }
+
+    if (typeof body.state !== 'number') {
+      return c.json(
+        {
+          success: false,
+          message: 'state must be a number',
+        },
+        400
+      );
+    }
+
+    if (typeof body.discounted_price !== 'number' || body.discounted_price <= 0) {
+      return c.json(
+        {
+          success: false,
+          message: 'discounted_price must be a positive number',
         },
         400
       );
     }
 
     // Validate slot
-    if (!body.slot || !body.slot.slot_id) {
+    if (!body.slot || !body.slot.slot_id || typeof body.slot.slot_id !== 'string') {
       return c.json(
         {
           success: false,
-          message: 'Valid slot with slot_id is required',
+          message: 'Valid slot with slot_id (string) is required',
         },
         400
       );
     }
 
-    // Validate address fields
-    const zipcodeStr = String(body.zipcode);
-    if (!zipcodeStr || !/^\d{6}$/.test(zipcodeStr)) {
+    // Validate address fields - ensure they are strings
+    if (!body.address || typeof body.address !== 'string') {
       return c.json(
         {
           success: false,
-          message: 'Valid 6-digit zipcode is required',
+          message: 'address must be a non-empty string',
         },
         400
       );
     }
 
-    // Use checksum key directly
-    if (!checksumKey) {
+    if (!body.zipcode || typeof body.zipcode !== 'string' || !/^\d{6}$/.test(body.zipcode)) {
       return c.json(
         {
           success: false,
-          message: 'HEALTHIANS_CHECKSUM_KEY not configured',
+          message: 'zipcode must be a 6-digit string',
         },
-        500
+        400
       );
     }
 
-    console.log('Creating Healthians booking:', {
+    // Validate latitude and longitude are strings
+    if (!body.latitude || typeof body.latitude !== 'string') {
+      return c.json(
+        {
+          success: false,
+          message: 'latitude must be a string',
+        },
+        400
+      );
+    }
+
+    if (!body.longitude || typeof body.longitude !== 'string') {
+      return c.json(
+        {
+          success: false,
+          message: 'longitude must be a string',
+        },
+        400
+      );
+    }
+
+    console.log('✅ Validation passed. Creating Healthians booking:', {
       vendor_booking_id: body.vendor_booking_id,
       customers: body.customer.length,
       packages: body.package.length,
       zone_id: body.zone_id,
-      checksum_configured: true,
+      user_uuid: userUuid,
     });
 
-    // CRITICAL: Use the exact stringified payload from frontend
-    // This ensures checksum is calculated on the same data that was sent
-    // DO NOT rebuild or re-stringify - use rawBody exactly as received
-    const payloadString = rawBody;
-    
-    // Generate checksum from the exact string that will be sent in the request body
+    // LOG EXACT TYPES RECEIVED
+    console.log('🔍 BACKEND - Type Check After Parsing:');
+    console.log('  zone_id:', body.zone_id, '| type:', typeof body.zone_id);
+    console.log('  cityId:', body.cityId, '| type:', typeof body.cityId);
+    console.log('  state:', body.state, '| type:', typeof body.state);
+    console.log('  discounted_price:', body.discounted_price, '| type:', typeof body.discounted_price);
+    console.log('  customer[0].age:', body.customer[0].age, '| type:', typeof body.customer[0].age);
+    console.log('  latitude:', body.latitude, '| type:', typeof body.latitude);
+    console.log('  longitude:', body.longitude, '| type:', typeof body.longitude);
+    console.log('  zipcode:', body.zipcode, '| type:', typeof body.zipcode);
+    console.log('  slot.slot_id:', body.slot.slot_id, '| type:', typeof body.slot.slot_id);
+
+
+    // Construct the exact payload for Healthians (exclude user_uuid)
+    const healthiansPayload = {
+      address: body.address,
+      altemail: body.altemail || '',
+      altmobile: body.altmobile || '',
+      billing_cust_name: body.billing_cust_name,
+      cityId: body.cityId,
+      client_id: body.client_id || '',
+      customer: body.customer,
+      customer_calling_number: body.customer_calling_number,
+      discounted_price: body.discounted_price,
+      email: body.email || '',
+      gender: body.gender,
+      hard_copy: body.hard_copy !== undefined ? body.hard_copy : 0,
+      landmark: body.landmark || '',
+      latitude: body.latitude,
+      longitude: body.longitude,
+      mobile: body.mobile,
+      package: body.package,
+      payment_option: body.payment_option,
+      slot: body.slot,
+      state: body.state,
+      sub_locality: body.sub_locality,
+      vendor_billing_user_id: body.vendor_billing_user_id,
+      vendor_booking_id: body.vendor_booking_id,
+      zipcode: body.zipcode,
+      zone_id: body.zone_id,
+    };
+
+    // Add partial_paid_amount only if present
+    if (body.partial_paid_amount !== undefined) {
+      (healthiansPayload as any).partial_paid_amount = body.partial_paid_amount;
+    }
+
+    // Stringify payload for checksum and request
+    const payloadString = JSON.stringify(healthiansPayload);
+
+    // Generate checksum from the exact string that will be sent
     const checksum = generateChecksumFromString(payloadString, checksumKey);
 
     const url = `${baseUrl}/api/${partnerName}/createBooking_v3`;
-    
+
     // Prepare headers
     const headers = {
       'Accept': 'application/json',
@@ -262,11 +380,11 @@ export const createHealthiansBooking = async (c: Context) => {
         : `Bearer ${accessToken}`,
       'X-Checksum': checksum,
     };
-    
+
     // Log the actual request being sent for debugging
     console.log('📋 Request URL:', url);
     console.log('📋 Request Headers:', JSON.stringify(headers, null, 2));
-    console.log('📋 Request Payload (from frontend):', payloadString);
+    console.log('📋 Request Payload:', payloadString);
     console.log('📋 Payload Length:', payloadString.length);
     console.log('✅ Checksum Header:', checksum);
 
@@ -277,16 +395,16 @@ export const createHealthiansBooking = async (c: Context) => {
     });
 
 
-    console.log('Healthians createBooking_v3 response status:', response.status);
+    console.log('📨 Healthians response status:', response.status);
     console.log("Healthians Response Received: ", response);
 
     // Process Healthians response - MUST succeed to proceed
     if (!response.ok) {
       const errorData = await safeJson(response);
       console.error('❌ Healthians booking creation failed:', errorData);
-      
+
       const apiError = (errorData as any)?.message || (errorData as any)?.code || `HTTP ${response.status} error`;
-      
+
       return c.json(
         {
           success: false,
@@ -299,7 +417,7 @@ export const createHealthiansBooking = async (c: Context) => {
     }
 
     const healthiansResponse = await response.json() as HealthiansBookingResponse;
-    console.log('Healthians booking response:', {
+    console.log('✅ Healthians booking response:', {
       success: healthiansResponse?.success || healthiansResponse?.status,
       booking_id: healthiansResponse?.booking_id || healthiansResponse?.id,
       message: healthiansResponse?.message,
@@ -307,11 +425,11 @@ export const createHealthiansBooking = async (c: Context) => {
 
     // Check both 'success' and 'status' fields as Healthians API may return either
     const isSuccess = healthiansResponse.success === true || healthiansResponse.status === true;
-    
+
     if (!isSuccess) {
       const healthiansError = healthiansResponse?.message || 'Healthians booking creation failed';
       console.error('❌ Healthians returned error:', healthiansError);
-      
+
       return c.json(
         {
           success: false,
@@ -333,7 +451,7 @@ export const createHealthiansBooking = async (c: Context) => {
     try {
       dbRecord = await storeBookingInDB(db, {
         booking_id: healthiansBookingId,
-        user_uuid: body.user_uuid || 'guest',
+        user_uuid: userUuid,
         customers: body.customer,
         address: {
           line1: body.address,
@@ -400,7 +518,7 @@ export const createHealthiansBooking = async (c: Context) => {
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     const errorStack = error instanceof Error ? error.stack : undefined;
-    console.error('Healthians booking exception:', errorMessage, errorStack);
+    console.error('❌ Healthians booking exception:', errorMessage, errorStack);
     return c.json(
       {
         success: false,
@@ -556,15 +674,15 @@ function generateChecksumFromString(dataString: string, key: string): string {
   console.log('🔐 Key Length:', key.length);
   console.log('🔐 Key Value (first 10 chars):', key.substring(0, 10));
   console.log('🔐 Key Value (last 4 chars):', key.substring(key.length - 4));
-  
+
   const hmac = crypto.createHmac('sha256', key);
-  hmac.update(dataString); 
+  hmac.update(dataString);
   const checksumHex = hmac.digest('hex');
-  
+
   console.log('🔐 HMAC Algorithm: SHA256');
   console.log('🔐 Generated Checksum:', checksumHex);
   console.log('🔐 Checksum Length:', checksumHex.length);
-  
+
   return checksumHex;
 }
 
